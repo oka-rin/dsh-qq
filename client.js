@@ -8,8 +8,17 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react');
     const h = React.createElement;
-    // Host routes are origin-relative; reverse proxies prepend the authoritative boot base.
-    const basePath = String(window.__DSH_BOOT__?.basePath || '').replace(/\/+$/, '');
+    // A stripping proxy does not necessarily advertise a boot base. The GUI's
+    // <base href="./"> preserves its public mount, including legacy scoped cookies.
+    function resolveBasePath(bootBase, baseURI, pageURL) {
+      const page = new URL(pageURL);
+      const configured = String(bootBase || '').replace(/\/+$/, '');
+      if (configured && /^\/(?!\/)/.test(configured) && !/[?#\\\\]/.test(configured)) return configured;
+      const base = new URL('.', baseURI || page.href);
+      if (base.origin !== page.origin) return '';
+      return base.pathname.replace(/\/+$/, '');
+    }
+    const basePath = resolveBasePath(window.__DSH_BOOT__?.basePath, document.baseURI, window.location.href);
     const B = basePath + '/dsh-qq';
     const request = async (p, init = {}) => {
       const controller = new AbortController();
@@ -17,7 +26,9 @@ window.__ModuleLoader__.load({
       try {
         const r = await fetch(B + p, { ...init, cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         const data = await r.json();
-        if (!r.ok) return { ...data, ok: false, error: data?.error || data?.reason || `HTTP ${r.status}` };
+        if (!r.ok) return { ...data, ok: false, httpStatus: r.status, error: r.status === 401
+          ? 'DSH 浏览器登录凭证缺失或已失效。请在当前站点重新打开你保存的 DSH 登录链接，再刷新此页；这不是 QQ 账号登录失败。'
+          : data?.error || data?.reason || `HTTP ${r.status}` };
         if (!data || typeof data !== 'object') return { ok: false, error: '接口未返回 JSON 对象' };
         if (data.result?.ok === false) return { ...data, ok: false, error: data.error || data.result.error || data.result.reason || '操作未完成' };
         return data;
@@ -845,7 +856,13 @@ window.__ModuleLoader__.load({
         if (!mounted.current || epoch.current !== version) return;
         const expires = typeof result?.expiresAt === 'number' ? result.expiresAt : Date.parse(result?.expiresAt);
         if (!result?.ok || result.url !== '/dsh-qq/login/desktop/view' || !Number.isFinite(expires) || expires <= Date.now()) {
-          // Even a malformed success may have created a remote session; release it explicitly.
+          // A definite HTTP rejection precedes session creation. Do not turn a 401
+          // into a fake "close unconfirmed" state that permanently disables Open.
+          if ([401, 403].includes(result?.httpStatus)) {
+            requested.current = false; lock.current = false; setBusy(''); onActive(false);
+            setMessage(reason(result)); return;
+          }
+          // A malformed success or transport timeout may have created a session.
           const cleanup = await release();
           if (!mounted.current || epoch.current !== version) return;
           requested.current = !cleanup?.ok;

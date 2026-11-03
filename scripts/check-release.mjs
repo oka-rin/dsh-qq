@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const botManifest = JSON.parse(fs.readFileSync(path.join(root, 'bot/package.json'), 'utf8'));
-assert.equal(manifest.version, '0.4.0', 'Unexpected release version');
+assert.equal(manifest.version, '0.4.1', 'Unexpected release version');
 assert.equal(botManifest.version, manifest.version, 'Bot and plugin versions must match');
 // npm excludes package-lock.json from published tarballs; audit it only in source checkouts.
 if (fs.existsSync(path.join(root, 'package-lock.json'))) {
