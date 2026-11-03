@@ -140,6 +140,28 @@ window.__ModuleLoader__.load({
       desktopCopyExpired: 'The password was cleared from page memory. Click “Copy remote desktop password” again if needed.',
       desktopCopyDenied: 'The browser copy command returned failure', desktopCopyUnavailable: 'Secure clipboard API is unavailable on this page', desktopCopyTimeout: 'Clipboard operation timed out',
     });
+    Object.assign(copy.zh, {
+      napcatIntro: '使用 NapCat 官方 HTTP WebUI 二维码登录，由 NapCat 自己进行 token 鉴权；不会打开远程桌面、启动网关或代接受协议。',
+      napcatOpen: '打开 NapCat 官方 WebUI', napcatPrivate: 'WebUI token 不是 QQ 密码或 OneBot token。请先复制，在官方 WebUI 中粘贴；不要发送到聊天。',
+      napcatCopy: '复制 NapCat WebUI token', napcatCopied: 'NapCat WebUI token 已复制', napcatCopyField: 'NapCat WebUI token（只读）',
+      napcatCopyNote: '仅点击时获取 WebUI token；页面内存最多保留 30 秒，离开即清除。剪贴板不会自动清空。',
+      napcatCopyFailed: '无法获取 NapCat WebUI token', napcatCopyInvalid: '宿主未返回有效的 NapCat WebUI token',
+      napcatCopyExpired: '页面中的 token 已清除；需要时请重新点击复制。',
+      napcatHttpWarning: 'NapCat WebUI 使用 HTTP：token 和扫码信息可能被网络中的其他人读取或篡改，仅在可信网络使用。',
+      napcatSetupIntro: '连接管理员已安装的 NapCat 原生网关。先核查服务，再使用官方 WebUI 扫码，最后检测 OneBot；网页不会代执行安装或管理员命令。',
+      napcatManual: 'NapCat 由宿主管理员安装并管理；此页不安装网关、不使用远程桌面。请在「运维」核查 NapCat 服务，再打开官方 WebUI 扫码。',
+    });
+    Object.assign(copy.en, {
+      napcatIntro: 'Log in with the QR code in the official NapCat HTTP WebUI, protected by its own token authentication. No remote desktop, automatic gateway start or agreement acceptance.',
+      napcatOpen: 'Open official NapCat WebUI', napcatPrivate: 'The WebUI token is not a QQ password or OneBot token. Copy it and paste into the official WebUI, never into chat.',
+      napcatCopy: 'Copy NapCat WebUI token', napcatCopied: 'NapCat WebUI token copied', napcatCopyField: 'NapCat WebUI token (read-only)',
+      napcatCopyNote: 'Fetched only on click; retained in page memory for at most 30 seconds and cleared on leaving. The clipboard is not auto-cleared.',
+      napcatCopyFailed: 'Could not get NapCat WebUI token', napcatCopyInvalid: 'The Host returned no valid NapCat WebUI token',
+      napcatCopyExpired: 'The token was cleared from page memory. Click copy again if needed.',
+      napcatHttpWarning: 'NapCat WebUI uses HTTP: tokens and login data may be read or altered on the network. Use only on a trusted network.',
+      napcatSetupIntro: 'Connect an administrator-installed native NapCat gateway. Review its service, scan in the official WebUI, then test OneBot; this page executes no installer or administrator commands.',
+      napcatManual: 'A host administrator installs and manages NapCat. This page does not install a gateway or use a remote desktop. Review the NapCat service in Operations, then open its official WebUI to scan.',
+    });
     let tr = (key) => copy.zh[key] || key;
 
     const S = {
@@ -784,6 +806,10 @@ window.__ModuleLoader__.load({
       if (typeof result.password !== 'string' || !result.password || result.password.length > 4096 || /[\r\n\0]/.test(result.password)) throw new Error(tr('desktopCopyInvalid'));
       return result.password;
     }
+    function napcatWebuiToken(result) {
+      if (result?.ok !== true || typeof result.token !== 'string' || !/^[\x21-\x7e]{16,4096}$/.test(result.token)) throw new Error(tr('napcatCopyInvalid'));
+      return result.token;
+    }
     // Deliberately synchronous: after fetch, execCommand can still work on HTTP.
     // A fresh trusted retry click also runs this before any promise/await.
     function legacyCopyPassword(value) {
@@ -828,6 +854,8 @@ window.__ModuleLoader__.load({
 
     // User-only credential action. No effect fetches it, and no model tool sees it.
     function DesktopPasswordCopy() {
+      const napcat = arguments[0]?.napcat === true;
+      const label = key => tr(napcat ? ({ desktopCopy: 'napcatCopy', desktopCopied: 'napcatCopied', desktopCopyField: 'napcatCopyField', desktopCopyNote: 'napcatCopyNote', desktopCopyFailed: 'napcatCopyFailed', desktopCopyInvalid: 'napcatCopyInvalid', desktopCopyExpired: 'napcatCopyExpired' }[key] || key) : key);
       const [busy, setBusy] = React.useState(false);
       const [fallback, setFallback] = React.useState(false);
       const [message, setMessage] = React.useState('');
@@ -856,54 +884,59 @@ window.__ModuleLoader__.load({
         try {
           if (!retry) {
             clearSecret(); setFallback(false);
-            const result = await post('/login/original/password', {});
-            if (!current()) return;
-            const value = remoteDesktopPassword(result);
-            result.password = '';
+            const result = napcat ? await post('/login/napcat/token', {}) : await post('/login/original/password', {});
+            let value;
+            try {
+              if (!current()) return;
+              value = napcat ? napcatWebuiToken(result) : remoteDesktopPassword(result);
+            } finally {
+              if (result && typeof result === 'object') { result.password = ''; if (napcat) result.token = ''; }
+            }
             secret.current = { value, expiresAt: Date.now() + 30000 };
+            value = '';
             expiry.current = setTimeout(() => {
               clearSecret();
-              if (mounted.current && life.current === epoch) { setFallback(false); setCopied(false); setMessage(tr('desktopCopyExpired')); }
+              if (mounted.current && life.current === epoch) { setFallback(false); setCopied(false); setMessage(label('desktopCopyExpired')); }
             }, 30000);
           }
           const held = secret.current;
-          if (!held?.value || held.expiresAt <= Date.now()) { clearSecret(); setFallback(false); setMessage(tr('desktopCopyExpired')); return; }
+          if (!held?.value || held.expiresAt <= Date.now()) { clearSecret(); setFallback(false); setMessage(label('desktopCopyExpired')); return; }
           const secureCopy = window.isSecureContext && typeof navigator.clipboard?.writeText === 'function'
             ? value => navigator.clipboard.writeText(value) : null;
           const result = await copyDesktopPassword(held.value, legacyCopyPassword, secureCopy,
             () => current() && secret.current === held && held.expiresAt > Date.now());
           if (!current() || secret.current !== held) return;
           if (result.ok) {
-            clearSecret(); setFallback(false); setCopied(true); setMessage(tr('desktopCopied'));
+            clearSecret(); setFallback(false); setCopied(true); setMessage(label('desktopCopied'));
           } else {
-            setFallback(true); setMessage(tr('desktopCopyFallback') + ' ' + loginDetail(result.error, held.value));
+            setFallback(true); setMessage(label('desktopCopyFallback') + ' ' + loginDetail(result.error, held.value));
           }
         } catch (error) {
-          if (current()) { const reason = loginDetail(error.message || error, secret.current?.value); clearSecret(); setFallback(false); setMessage(tr('desktopCopyFailed') + ': ' + reason); }
+          if (current()) { const reason = loginDetail(error.message || error, secret.current?.value); clearSecret(); setFallback(false); setMessage(label('desktopCopyFailed') + ': ' + reason); }
         } finally {
           if (lock.current === ticket) lock.current = null;
           if (mounted.current && life.current === epoch) setBusy(false);
         }
       };
       const reveal = () => {
-        if (!secret.current?.value || secret.current.expiresAt <= Date.now()) { clearSecret(); setFallback(false); setMessage(tr('desktopCopyExpired')); return; }
+        if (!secret.current?.value || secret.current.expiresAt <= Date.now()) { clearSecret(); setFallback(false); setMessage(label('desktopCopyExpired')); return; }
         if (input.current) { input.current.type = 'text'; input.current.focus(); input.current.select(); }
       };
       return h('div', { style: { marginTop: 8 }, 'aria-busy': busy },
-        h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: () => run(false) }, tr(busy ? 'desktopCopying' : 'desktopCopy')),
-        h('p', { style: S.dim }, tr('desktopCopyNote')),
+        h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: () => run(false) }, label(busy ? 'desktopCopying' : 'desktopCopy')),
+        h('p', { style: S.dim }, label('desktopCopyNote')),
         message ? h('p', { role: copied ? 'status' : 'alert', style: { ...S.dim, color: copied ? T.success : T.warn, overflowWrap: 'anywhere' } }, message) : null,
         fallback && secret.current ? h('div', { style: { ...行, marginTop: 6 } },
           h('input', { ref: input, type: 'password', readOnly: true, value: secret.current.value, autoComplete: 'off', spellCheck: false,
-            'aria-label': tr('desktopCopyField'), style: { ...输入框, width: 220, maxWidth: '100%' } }),
-          h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: () => run(true) }, tr('desktopCopyRetry')),
-          h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: reveal }, tr('desktopCopyReveal'))) : null);
+            'aria-label': label('desktopCopyField'), style: { ...输入框, width: 220, maxWidth: '100%' } }),
+          h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: () => run(true) }, label('desktopCopyRetry')),
+          h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: reveal }, label('desktopCopyReveal'))) : null);
     }
 
     // Only this exact relative URL is accepted; the public mount is resolved above.
     function desktopViewPath(result, mount, now = Date.now()) {
       const expires = typeof result?.expiresAt === 'number' ? result.expiresAt : Date.parse(result?.expiresAt);
-      if (!['/dsh-qq/login/desktop/view', '/dsh-qq/login/original'].includes(result?.url) || !Number.isFinite(expires) || expires <= now) {
+      if (!['/dsh-qq/login/desktop/view', '/dsh-qq/login/original', '/dsh-qq/login/napcat'].includes(result?.url) || !Number.isFinite(expires) || expires <= now) {
         throw new Error(tr('desktopInvalid'));
       }
       return mount + result.url;
@@ -916,6 +949,7 @@ window.__ModuleLoader__.load({
     }
 
     function LoginPanel() {
+      const napcat = arguments[0]?.backend === 'napcat';
       const [status, setStatus] = React.useState(null);
       const [checking, setChecking] = React.useState(false);
       const [opening, setOpening] = React.useState(false);
@@ -936,7 +970,7 @@ window.__ModuleLoader__.load({
           if (!result?.ok || !['logged_in', 'waiting_scan', 'qr_captured', 'unavailable'].includes(result.state)) {
             setStatus(null); setStatusError(detail(result?.error || result?.reason) || tr('loginFailed'));
           } else {
-            setStatus({ state: result.state, account: result.account, reason: detail(result.reason) });
+            setStatus({ backend: result.backend, state: result.state, account: result.account, reason: detail(result.reason) });
             setStatusError('');
           }
         } catch (error) {
@@ -984,14 +1018,14 @@ window.__ModuleLoader__.load({
             loggedIn && status.account?.user_id ? ` · ${detail(status.account.nickname)} (${detail(status.account.user_id)})` : ''),
           h('button', { type: 'button', style: S.btn(false), disabled: checking,
             onClick: () => readStatus() }, tr(checking ? 'loginChecking' : 'loginCheck'))),
-        h('p', { style: S.dim }, tr('loginIntro')),
+        h('p', { style: S.dim }, tr(napcat ? 'napcatIntro' : 'loginIntro')),
         status?.reason ? h('p', { style: { ...S.dim, overflowWrap: 'anywhere' } }, status.reason) : null,
         statusError ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, statusError) : null,
-        h('button', { type: 'button', style: S.btn(true), disabled: opening, onClick: open }, tr(opening ? 'desktopOpening' : 'desktopOpen')),
-        h(DesktopPasswordCopy),
+        h('button', { type: 'button', style: S.btn(true), disabled: opening, onClick: open }, tr(opening ? 'desktopOpening' : napcat ? 'napcatOpen' : 'desktopOpen')),
+        napcat ? h(DesktopPasswordCopy, { key: 'napcat', napcat: true }) : h(DesktopPasswordCopy),
         openError ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, openError) : null,
-        h('p', { style: S.dim }, tr('desktopPrivate')),
-        window.location.protocol === 'http:' ? h('p', { role: 'note', style: { ...S.dim, color: T.warn } }, tr('desktopHttpWarning')) : null,
+        h('p', { style: S.dim }, tr(napcat ? 'napcatPrivate' : 'desktopPrivate')),
+        window.location.protocol === 'http:' ? h('p', { role: 'note', style: { ...S.dim, color: T.warn } }, tr(napcat ? 'napcatHttpWarning' : 'desktopHttpWarning')) : null,
         h('p', { style: S.dim }, tr('loginSeparate')));
     }
 
@@ -1122,7 +1156,7 @@ window.__ModuleLoader__.load({
       });
       return h('div', { style: S.wrap },
         h('div', { style: S.head }, h('h1', { style: S.h1 }, tr('setupTitle'))),
-        h('p', null, tr('setupIntro')),
+        h('p', null, tr(info?.backend === 'napcat' ? 'napcatSetupIntro' : 'setupIntro')),
         h('p', { style: { ...S.pickBox, color: T.warn } }, tr('setupDocker')),
         h('section', { style: S.card, 'aria-label': tr('setupPrep') },
           h('div', { style: S.h2row }, h('h2', { style: S.h2inner }, tr('setupPrep')),
@@ -1135,18 +1169,18 @@ window.__ModuleLoader__.load({
             h('span', { style: { color: check.ok === true ? T.success : check.ok === false ? T.warn : T.muted } }, tr(check.ok === true ? 'setupPass' : check.ok === false ? 'setupFail' : 'setupUnknown')),
             check.detail ? h('div', { style: S.dim }, safeText(check.detail)) : null)))
             : h('p', { style: S.dim }, tr('setupChecksEmpty')),
-          info?.host?.platform === 'linux' ? h('div', { style: { ...S.pickBox, display: 'flex', flexWrap: 'wrap', gap: 10 } },
+          info?.host?.platform === 'linux' && info?.backend !== 'napcat' ? h('div', { style: { ...S.pickBox, display: 'flex', flexWrap: 'wrap', gap: 10 } },
             // Ensure missing Linux dependency results stay visible as unknown, never green.
             ...[['qq', 'setupQQ', /(?:^|[^a-z0-9])(?:linux[-_ ]?)?qq(?:$|[^a-z0-9])/i], ['xvfb', 'setupXvfb', /xvfb/i], ['ffmpeg', 'setupFfmpeg', /ffmpeg/i]].map(([id, label, pattern]) => {
               const check = checks.find((item) => pattern.test(`${item.id || ''} ${item.label || ''}`));
               return h('span', { key: id }, `${tr(label)} · ${tr(check?.ok === true ? 'setupPass' : check?.ok === false ? 'setupFail' : 'setupUnknown')}`);
             })) : null,
-          h('p', null, tr('setupManual')),
+          h('p', null, tr(info?.backend === 'napcat' ? 'napcatManual' : 'setupManual')),
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 14 } }, ...(links.length ? links : [h('span', { key: 'none', style: S.dim }, tr('setupNoLinks'))])),
           h('p', { style: { color: T.warn } }, tr('setupEula')),
           h('div', { style: S.dim }, tr('setupAuto'), info?.automaticInstall?.reason ? ` · ${safeText(info.automaticInstall.reason)}` : ''),
           info?.native?.service ? h('p', { style: { ...S.dim, overflowWrap: 'anywhere' } }, `${tr('setupService')}: ${safeText(info.native.service)} · ${tr(info.native.scope === 'system' ? 'setupSystemScope' : 'setupUserScope')}`) : null),
-        active ? h(LoginPanel) : null,
+        active && info ? h(LoginPanel, { key: info.backend || 'snowluma', backend: info.backend }) : null,
         h('section', { style: S.card, 'aria-label': tr('setupConnect') },
           h('h2', { style: S.h2 }, tr('setupConnect')),
           h('p', { style: S.dim }, tr('setupLocal')),
@@ -1232,11 +1266,12 @@ window.__ModuleLoader__.load({
       };
 
       const snowMode = snow?.status?.mode || snow?.mode;
+      const gatewayName = snow?.status?.backend === 'napcat' ? 'NapCat' : 'SnowLuma';
       const snowTarget = snowMode === 'native' ? '原生 systemd 服务' : snowMode === 'external' ? '外部网关（仅连接）' : snowMode === 'docker' ? 'Docker 容器' : '网关（管理模式未知）';
       const snowManageable = snow?.ok && (snowMode === 'native' || snowMode === 'docker');
       const snowAction = async (op) => {
         if (snowLock.current || !snowManageable) return;
-        if (op !== 'start' && !window.confirm(`${op === 'stop' ? '停止' : '重启'} SnowLuma ${snowTarget}会断开 QQ 连接，确定继续？`)) return;
+        if (op !== 'start' && !window.confirm(`${op === 'stop' ? '停止' : '重启'} ${gatewayName} ${snowTarget}会断开 QQ 连接，确定继续？`)) return;
         snowLock.current = true; setSnowBusy(true); setSnowMessage('执行中…');
         const r = await post('/snowluma/action', { op, confirm: true });
         snowLock.current = false;
@@ -1248,8 +1283,8 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
-        h('section', { style: S.card }, h('h2', { style: S.h2 }, 'SnowLuma · QQ 网关'),
-          snow?.ok ? h('div', { style: S.dim }, `${snowTarget} · ${snow.status?.service || snow.status?.name || snow.name || 'SnowLuma'} · ${snow.status?.status || snow.status?.running && '运行中' || '未运行'}${snow.status?.scope ? ` · ${snow.status.scope === 'user' ? '用户级' : '系统级'}` : ''}${snow.status?.image ? ` · ${snow.status.image}` : ''}`)
+        h('section', { style: S.card }, h('h2', { style: S.h2 }, `${gatewayName} · QQ 网关`),
+          snow?.ok ? h('div', { style: S.dim }, `${snowTarget} · ${snow.status?.service || snow.status?.name || snow.name || gatewayName} · ${snow.status?.status || snow.status?.running && '运行中' || '未运行'}${snow.status?.scope ? ` · ${snow.status.scope === 'user' ? '用户级' : '系统级'}` : ''}${snow.status?.image ? ` · ${snow.status.image}` : ''}`)
             : h('div', { role: 'status', style: S.dim }, snow ? `状态不可用：${snow.error || '无法检查网关'}` : '读取网关状态中…'),
           snowMode === 'external' ? h('p', { style: S.dim }, '仅检测外部网关连接；此页不启动、停止或重启外部网关。') : null,
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 } },

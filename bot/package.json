@@ -1,9 +1,9 @@
 {
   "name": "snowluma-qq",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "private": true,
   "license": "MIT",
-  "description": "把 SnowLuma 的 QQ 会话接给 AI：自动群聊 + 自由操控（零依赖，Node >= 22）",
+  "description": "把 NapCat / SnowLuma OneBot QQ 会话接给 AI：自动群聊 + 自由操控（零依赖，Node >= 22）",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

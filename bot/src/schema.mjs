@@ -13,6 +13,7 @@ export const CONFIG_SCHEMA = [
     title: '连接',
     note: 'OneBot / 控制台的地址与令牌。改完要重启进程才生效。',
     fields: [
+      { path: 'onebot.gateway', label: 'OneBot 后端', type: 'select', options: ['snowluma', 'napcat'], hint: 'NapCat 启用已验证的扩展动作兼容；切换地址与令牌后重启生效' },
       { path: 'onebot.httpUrl', label: 'OneBot HTTP 地址', type: 'text', hint: '默认 http://127.0.0.1:3000' },
       { path: 'onebot.wsUrl', label: 'OneBot WS 地址', type: 'text', hint: '默认 ws://127.0.0.1:3001/event' },
       { path: 'onebot.accessToken', label: 'HTTP 令牌', type: 'secret' },

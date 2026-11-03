@@ -103,6 +103,36 @@ test('user-only component fetches exactly on explicit action and keeps same-tab 
   assert.doesNotMatch(panel, /console\.|localStorage|sessionStorage|URLSearchParams|window\.location|navigator\.clipboard\.writeText\(''\)/);
 });
 
+test('NapCat token responses are wiped after copy, invalid validation, late unmount and TTL', async () => {
+  const token = 'synthetic-napcat-token-0123456789';
+  async function mount({ late = false, invalid = false, copied = false } = {}) {
+    const refs = [], timers = []; let cleanup, resolve;
+    const response = { ok: true, token: invalid ? 'eightchr' : token };
+    const React = {
+      useState: value => [value, () => {}],
+      useRef: value => { const ref = { current: value }; refs.push(ref); return ref; },
+      useEffect: fn => { cleanup = fn(); },
+    };
+    const Component = vm.runInNewContext(`${helpers}\ncopyDesktopPassword = async () => ({ ok: ${copied} });\n${panel}\nDesktopPasswordCopy`, {
+      React, tr: key => key, h: (type, props, ...children) => ({ type, props, children }),
+      S: { btn: () => ({}), dim: {} }, T: {}, 行: {}, 输入框: {}, window: {}, navigator: {},
+      post: (route, input) => { assert.equal(route, '/login/napcat/token'); assert.equal(JSON.stringify(input), '{}'); return late ? new Promise(done => { resolve = done; }) : Promise.resolve(response); },
+      setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {},
+    });
+    const tree = Component({ napcat: true });
+    const pending = tree.children[0].props.onClick();
+    if (late) { cleanup(); resolve(response); }
+    await pending;
+    assert.equal(response.token, '', 'response container is wiped even for stale/invalid data');
+    return { refs, timers, cleanup };
+  }
+  const success = await mount({ copied: true }); assert.equal(success.refs[0].current, null);
+  const fallback = await mount(); assert.equal(fallback.refs[0].current.value, token);
+  const held = fallback.refs[0].current; fallback.timers[0](); assert.equal(held.value, ''); assert.equal(fallback.refs[0].current, null);
+  const unmount = await mount(); const retained = unmount.refs[0].current; unmount.cleanup(); assert.equal(retained.value, '');
+  await mount({ invalid: true }); await mount({ late: true });
+});
+
 test('fallback is readonly/masked until explicit reveal and fully cleared by TTL/unmount', () => {
   assert.match(panel, /type: 'password', readOnly: true/);
   assert.match(panel, /input\.current\.type = 'text'; input\.current\.focus\(\); input\.current\.select\(\)/);

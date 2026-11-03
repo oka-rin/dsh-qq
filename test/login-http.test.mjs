@@ -36,7 +36,7 @@ async function fixture(t, options = {}) {
       registerUpgrade(route) { upgrades.set(route.path, route.handler); return () => upgrades.delete(route.path); },
     },
   };
-  const api = registerLoginHttp({ ctx, login, desktop, originalLogin: options.originalLogin, readBody: () => { throw new Error('must not use unbounded shared reader'); }, assetPath: fileURLToPath(new URL('../desktop-client.js', import.meta.url)) });
+  const api = registerLoginHttp({ ctx, login, desktop, originalLogin: options.originalLogin, napcatLogin: options.napcatLogin, readBody: () => { throw new Error('must not use unbounded shared reader'); }, assetPath: fileURLToPath(new URL('../desktop-client.js', import.meta.url)) });
   const server = http.createServer((req, res) => {
     // Emulate a mount proxy stripping /dsh before the carrier sees requests.
     req.url = req.url.replace(/^\/dsh(?=\/)/, '');
@@ -322,4 +322,41 @@ test('WS wrapper catches backend exceptions and blocks revoked authentication an
   f.setAuth(false); assert.match(await f.upgrade('/desktop/ws', { cookie }), /^HTTP\/1.1 403/); assert.equal(upgrades, 1);
   f.setAuth(true); f.api.dispose(); assert.match(await f.upgrade('/desktop/ws', { cookie }), /^HTTP\/1.1 403/); assert.equal(upgrades, 1);
   assert.equal((await f.request('/status')).status, 400);
+});
+
+const napcatToken = 'test-only-napcat-token-0123456789';
+function napcatBackend(overrides = {}) {
+  return { target: async () => ({ provider: 'napcat', port: 6099 }), redirect: () => 'http://qq-login.example.test:6099/webui/', token: async () => ({ ok: true, token: napcatToken, internal: 'do-not-project' }), ...overrides };
+}
+test('NapCat official HTTP hop and explicit token action retain browser authentication/CSRF and no-store', async t => {
+  let reads = 0;
+  const f = await fixture(t, { napcatLogin: napcatBackend({ token: async () => { reads++; return { ok: true, token: napcatToken, password: 'never-project' }; } }) });
+  for (const path of ['/napcat', '/napcat/token']) {
+    assert.equal((await f.request(path, { auth: false, ...(path.endsWith('token') ? post() : {}) })).status, 401);
+  }
+  for (const options of [{ method: 'GET' }, post({}, { origin: '' }), post({}, { origin: 'http://evil.test' }), post({}, { 'sec-fetch-site': 'cross-site' }), post({}, { 'content-type': 'text/plain' }), post({ redirect: 'http://evil.test' }), post(' '.repeat(4097))]) {
+    assert.notEqual((await f.request('/napcat/token', options)).status, 200);
+  }
+  assert.equal(reads, 0);
+  const prepared = await f.request('/desktop/session', post());
+  assert.equal(prepared.json.provider, 'napcat'); assert.equal(prepared.json.url, root + '/napcat');
+  assert.doesNotMatch(prepared.text, /token|password/);
+  assert.ok(!f.calls.some(([name]) => name === 'start'));
+  const jump = await f.request('/napcat');
+  assert.equal(jump.status, 302); assert.equal(jump.headers.location, 'http://qq-login.example.test:6099/webui/');
+  assert.equal(jump.headers['cache-control'], 'no-store'); assert.equal(jump.headers['referrer-policy'], 'no-referrer');
+  assert.notEqual((await f.request('/napcat?redirect=http://evil.test')).status, 302);
+  const copied = await f.request('/napcat/token', post());
+  assert.deepEqual(copied.json, { ok: true, token: napcatToken }); assert.equal(copied.headers['cache-control'], 'no-store');
+  assert.equal(reads, 1);
+  for (let i = 1; i < 6; i++) assert.equal((await f.request('/napcat/token', post())).status, 200);
+  assert.equal((await f.request('/napcat/token', post())).status, 429); assert.equal(reads, 6);
+});
+test('NapCat token errors and malformed backend output never echo secrets or metadata', async t => {
+  for (const token of ['', 'eightchr', 'a'.repeat(4097), 'a'.repeat(32) + '\n', 42]) {
+    const f = await fixture(t, { napcatLogin: napcatBackend({ token: async () => ({ ok: true, token, password: napcatToken }) }) });
+    const result = await f.request('/napcat/token', post()); assert.equal(result.status, 400); assert.doesNotMatch(result.text, /test-only-napcat|password/);
+  }
+  const f = await fixture(t, { napcatLogin: napcatBackend({ token: async () => { throw new Error(napcatToken); }, target: async () => { throw new Error(napcatToken); } }) });
+  for (const [path, options] of [['/napcat/token', post()], ['/napcat', {}]]) { const r = await f.request(path, options); assert.equal(r.status, 400); assert.equal(r.text.includes(napcatToken), false); }
 });

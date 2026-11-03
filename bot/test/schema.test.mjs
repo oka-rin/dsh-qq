@@ -27,7 +27,7 @@ test('every field path is unique and present in the public example config', () =
   const paths = CONFIG_SCHEMA.flatMap((g) => g.fields.map((f) => f.path));
   assert.equal(FIELD_BY_PATH.size, paths.length, '同一个 path 不能登记两次');
   assert.equal(CONFIG_SCHEMA.length, 12);
-  assert.equal(paths.length, 200);
+  assert.equal(paths.length, 201);
   const live = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
   const missing = paths.filter((p) => getByPath(live, p) === undefined);
   assert.deepEqual(missing, [], '公开示例应包含全部可编辑字段，测试不得依赖私人 config.json');
@@ -82,7 +82,7 @@ test('GET /api/config exposes the whole schema, with secrets masked', async (t) 
   const body = await (await f.request('/api/config')).json();
   assert.equal(body.ok, true);
   assert.equal(body.schema.length, 12);
-  assert.equal(body.schema.flatMap((g) => g.fields).length, 200);
+  assert.equal(body.schema.flatMap((g) => g.fields).length, 201);
 
   const secret = body.schema.flatMap((g) => g.fields).find((fl) => fl.path === 'llm.apiKey');
   assert.equal(secret.value, '', '密钥不能回显');

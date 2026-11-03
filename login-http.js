@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { validNapcatToken } from './napcat-login.js';
 import { assertLoginRequest } from './login.js';
 
 const ROOT = '/dsh-qq/login';
@@ -52,7 +53,7 @@ function body(req, signal) {
 }
 
 /** Browser-only credential surfaces; never register these operations as model tools. */
-export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogin = null }) {
+export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogin = null, napcatLogin = null }) {
   let session = null, busy = false, disposed = false;
   let passwordWindowAt = Date.now(), passwordRequests = 0;
   const requests = new Set();
@@ -102,6 +103,29 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
     send(res, 200, value);
   });
 
+  exact('/napcat', async (req, res, signal) => {
+    if (req.method !== 'GET' || !napcatLogin) throw new Error('NapCat WebUI 未配置');
+    try {
+      await until(napcatLogin.target({ signal }), signal);
+      const location = napcatLogin.redirect(req);
+      res.writeHead(302, { ...HEADERS, location }); res.end();
+    } catch { throw new Error('无法打开 NapCat 官方 WebUI；请检查服务与端口'); }
+  });
+  exact('/napcat/token', async (req, res, signal) => {
+    mutation(req);
+    const input = await body(req, signal);
+    if (Object.keys(input).length) throw new Error('token 请求不接受参数');
+    if (!napcatLogin || signal.aborted) throw new Error('NapCat WebUI 未配置');
+    if (Date.now() - passwordWindowAt >= 60_000) { passwordWindowAt = Date.now(); passwordRequests = 0; }
+    if (passwordRequests >= 6) { send(res, 429, { ok: false, error: 'token 读取过于频繁，请稍后重试' }); return; }
+    passwordRequests++;
+    try {
+      const value = await until(napcatLogin.token({ signal }), signal);
+      if (value?.ok !== true || !validNapcatToken(value.token) || signal.aborted || disposed || res.destroyed) throw new Error();
+      send(res, 200, { ok: true, token: value.token });
+    } catch { throw new Error('无法安全读取 NapCat WebUI token；请检查管理员配置'); }
+  });
+
   // Docker deployments already provide the original SnowLuma noVNC desktop.
   // Only advertise this fixed authenticated hop; never accept a redirect URL
   // from the browser. Credential retrieval is a separate explicit POST below.
@@ -139,6 +163,11 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
     const input = await body(req, signal);
     if (Object.keys(input).length) throw new Error('桌面请求不接受参数');
     if (signal.aborted) throw cancelled();
+    if (napcatLogin) {
+      await until(napcatLogin.target({ signal }), signal);
+      send(res, 200, { ok: true, url: ROOT + '/napcat', expiresAt: Date.now() + 120000, provider: 'napcat' });
+      return;
+    }
     if (originalLogin) {
       await until(originalLogin.target({ signal }), signal); // Verify the original service, without starting a substitute.
       send(res, 200, { ok: true, url: ROOT + '/original', expiresAt: Date.now() + 120000, provider: 'snowluma-original' });
@@ -194,6 +223,6 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
     if (disposed) return;
     disposed = true;
     for (const ctrl of requests) ctrl.abort();
-    clear(); desktop.dispose(); login.dispose(); originalLogin?.dispose?.();
+    clear(); desktop.dispose(); login.dispose(); originalLogin?.dispose?.(); napcatLogin?.dispose?.();
   } };
 }

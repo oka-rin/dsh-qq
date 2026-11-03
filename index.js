@@ -18,6 +18,7 @@ import { createLogin } from './login.js';
 import { createDesktop } from './desktop.js';
 import { registerLoginHttp } from './login-http.js';
 import { createOriginalLogin, originalRedirect } from './original-login.js';
+import { createNapcatLogin, NAPCAT_WEBUI_CONFIG } from './napcat-login.js';
 import { fileURLToPath } from 'node:url';
 
 import Schema from '@deepseek-ai/schemastery';
@@ -35,6 +36,10 @@ const DEFAULTS = {
   autoRestart: true,
   restartDelayMs: 3000,
   logLines: 400,
+  gatewayBackend: 'snowluma',
+  napcatService: 'napcat.service',
+  napcatWebuiPort: 6099,
+  napcatWebuiConfigPath: NAPCAT_WEBUI_CONFIG,
   snowLumaComposeFile: '',
   snowLumaContainer: 'snowluma',
   snowLumaMode: 'native',
@@ -122,6 +127,10 @@ export const Config = Schema.object({
   autoRestart: Schema.boolean().default(true).description('托管进程意外退出时自动拉起'),
   restartDelayMs: Schema.number().min(500).default(3000).description('自动重启间隔（毫秒）'),
   logLines: Schema.number().min(20).max(5000).default(400).description('内存日志保留行数'),
+  gatewayBackend: Schema.union(['snowluma', 'napcat']).default('snowluma').description('QQ OneBot 网关后端；NapCat 使用官方 HTTP WebUI 扫码，不使用远程桌面'),
+  napcatService: Schema.string().default('napcat.service').description('已安装的 NapCat 原生 systemd 服务；不会自动创建或启动'),
+  napcatWebuiPort: Schema.number().min(1).max(65535).step(1).default(6099).description('NapCat 官方 HTTP WebUI 固定端口；只探测 127.0.0.1 的 /webui/，浏览器跳转同主机此端口'),
+  napcatWebuiConfigPath: Schema.string().default(NAPCAT_WEBUI_CONFIG).description('管理员指定的 NapCat WebUI JSON 绝对路径；token 仅经已认证浏览器显式复制，不向模型工具返回'),
   snowLumaMode: Schema.union(['native', 'docker', 'external']).default('native').description('默认接入宿主机原版；Docker 仅兼容已有部署，external 只连接不启停'),
   snowLumaService: Schema.string().default('snowluma.target').description('已由操作者安装的原生 systemd 服务或 target；不会自动创建服务'),
   snowLumaServiceScope: Schema.union(['system', 'user']).default('system').description('原生 systemd 服务范围'),
@@ -570,15 +579,21 @@ export function apply(ctx, config = {}) {
     }
   });
 
-  const setup = createSetup({ configPath, nativeService: cfg.snowLumaService, nativeScope: cfg.snowLumaServiceScope });
+  if (!['snowluma', 'napcat'].includes(cfg.gatewayBackend)) throw new Error('不支持的网关后端');
+  const napcat = cfg.gatewayBackend === 'napcat';
+  const setup = createSetup({ configPath, gatewayBackend: cfg.gatewayBackend, nativeService: napcat ? cfg.napcatService : cfg.snowLumaService, nativeScope: napcat ? 'system' : cfg.snowLumaServiceScope });
   const windowOptions = { mode: cfg.snowLumaMode, container: cfg.snowLumaContainer,
     display: cfg.snowLumaMode === 'docker' ? ':1' : cfg.snowLumaDisplay,
     xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };
-  const login = createLogin({ ...windowOptions, check: () => setup.check() });
-  const desktop = createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
-  const original = createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer, nativePort: cfg.snowLumaDesktopPort });
+  const login = napcat ? { async status() {
+    try { const result = await setup.check(); return { ok: true, state: 'logged_in', backend: 'napcat', account: result.account }; }
+    catch { return { ok: true, state: 'unavailable', backend: 'napcat', reason: '尚未验证 OneBot HTTP / WebSocket 连接；请在 NapCat 官方 WebUI 确认登录，再检测 OneBot 配置' }; }
+  }, dispose() {} } : createLogin({ ...windowOptions, check: () => setup.check() });
+  const desktop = napcat ? { stop() {}, dispose() {} } : createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
+  const original = napcat ? null : createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer, nativePort: cfg.snowLumaDesktopPort });
   const loginHttp = registerLoginHttp({ ctx, login, desktop, readBody,
-    originalLogin: (cfg.snowLumaMode === 'docker' || (cfg.snowLumaMode === 'native' && cfg.snowLumaDesktopPort !== 0)) ? { target: (options) => original.target(options), password: (options) => original.password(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
+    napcatLogin: napcat ? createNapcatLogin({ port: cfg.napcatWebuiPort, configPath: cfg.napcatWebuiConfigPath }) : null,
+    originalLogin: !napcat && (cfg.snowLumaMode === 'docker' || (cfg.snowLumaMode === 'native' && cfg.snowLumaDesktopPort !== 0)) ? { target: (options) => original.target(options), password: (options) => original.password(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
     assetPath: path.join(PKG_DIR, 'assets/desktop-viewer.js') });
   const setupAction = async (action, input = {}) => {
     ensureDataDir();
@@ -597,6 +612,7 @@ export function apply(ctx, config = {}) {
   });
 
   const gatewayStatus = async () => {
+    if (napcat) return { ...await nativeStatus(cfg.napcatService, 'system'), backend: 'napcat' };
     if (cfg.snowLumaMode === 'native') return nativeStatus(cfg.snowLumaService, cfg.snowLumaServiceScope);
     if (cfg.snowLumaMode === 'external') {
       try { const checked = await setupAction('check'); return { mode: 'external', running: true, status: 'connected', account: checked.account }; }
@@ -618,8 +634,12 @@ export function apply(ctx, config = {}) {
     if (!['start', 'stop', 'restart'].includes(op)) throw new Error('不支持的网关操作');
     if (confirm !== true) throw new Error('网关操作需要明确确认（confirm:true）');
     let output;
-    if (cfg.snowLumaMode === 'external') throw new Error('外部模式只连接，不启停网关');
-    if (cfg.snowLumaMode === 'native') {
+    if (!napcat && cfg.snowLumaMode === 'external') throw new Error('外部模式只连接，不启停网关');
+    if (napcat) {
+      try { await command('systemctl', nativeServiceArgs(cfg.napcatService, 'system', op), { timeoutMs: 60000 }); }
+      catch { throw new Error('NapCat 服务操作失败；请由管理员检查 systemd 服务'); }
+      output = ''; // Never relay gateway command output (may contain credentials).
+    } else if (cfg.snowLumaMode === 'native') {
       output = await command('systemctl', nativeServiceArgs(cfg.snowLumaService, cfg.snowLumaServiceScope, op), { timeoutMs: 60000 });
     } else if (cfg.snowLumaMode === 'docker') {
       // Compatibility management only: never create containers, pull images or deploy upstream.
@@ -645,7 +665,7 @@ export function apply(ctx, config = {}) {
 
   const toolDisposers = [];
   const managementTools = [
-    defineTool({ name: 'qq_setup', description: '检查本机原版 QQ 网关依赖、测试 OneBot 登录或保存接入配置（保存后需重启机器人）。不安装 SnowLuma、不代同意上游协议。',
+    defineTool({ name: 'qq_setup', description: '检查本机原版 QQ 网关依赖、测试 OneBot 登录或保存接入配置（保存后需重启机器人）。不安装网关、不代同意上游协议。',
       parameters: { action: { type: 'string', enum: ['status', 'check', 'connect'], required: true },
         httpUrl: { type: 'string', description: '本机 OneBot HTTP 根地址' }, wsUrl: { type: 'string', description: '本机 WebSocket 地址，可带 /event' },
         token: { type: 'string', description: '省略则同地址复用旧 token；空字符串表示不使用 token' },
@@ -663,7 +683,7 @@ export function apply(ctx, config = {}) {
   for (const spec of TOOLS) {
     ctx.effect(() => {
       const dispose = ctx.tools.register(defineTool({
-        name: spec.name, description: spec.description, parameters: toParamSpec(spec.inputSchema),
+        name: spec.name, description: spec.description.replaceAll('SnowLuma', 'OneBot 网关'), parameters: toParamSpec(spec.inputSchema),
         output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] },
         timeoutMs: 240000,
         async execute(args) {

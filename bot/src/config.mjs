@@ -5,6 +5,7 @@ import { DAILY_NEWS_DEFAULTS } from './daily-news.mjs';
 
 export const DEFAULTS = {
   onebot: {
+    gateway: 'snowluma',
     httpUrl: 'http://127.0.0.1:3000',
     // SnowLuma 的 WS 同时接受 / 与 /event；默认走 /event
     wsUrl: 'ws://127.0.0.1:3001/event',

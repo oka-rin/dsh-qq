@@ -36,7 +36,7 @@ export async function nativeStatus(service, scope, run = command) {
 }
 
 /** Read-only preparation and explicit connection of an operator-installed original gateway. */
-export function createSetup({ configPath, nativeService = 'snowluma.target', nativeScope = 'system', run = command, fetcher = fetch, Socket = WebSocket }) {
+export function createSetup({ configPath, gatewayBackend = 'snowluma', nativeService = gatewayBackend === 'napcat' ? 'napcat.service' : 'snowluma.target', nativeScope = 'system', run = command, fetcher = fetch, Socket = WebSocket }) {
   const read = () => JSON.parse(fs.readFileSync(configPath, 'utf8'));
   async function check(input = {}) {
     const current = read().onebot || {};
@@ -113,16 +113,16 @@ export function createSetup({ configPath, nativeService = 'snowluma.target', nat
     const envName = c.llm?.apiKeyEnv ?? 'DEEPSEEK_API_KEY';
     let envKey = false;
     try { envKey = fs.readFileSync(path.join(path.dirname(configPath), '.env'), 'utf8').split('\n').some(line => { const match = line.trim().match(/^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/); return match?.[1] === envName && Boolean(match[2].replace(/^['\"]|['\"]$/g, '').trim()); }); } catch {}
-    const qqPath = ['/opt/QQ/qq', '/opt/snowluma/qq/qq'].find(file => fs.existsSync(file));
+    const qqPath = (gatewayBackend === 'napcat' ? ['/opt/QQ/qq'] : ['/opt/QQ/qq', '/opt/snowluma/qq/qq']).find(file => fs.existsSync(file));
     const qq = Boolean(qqPath);
-    return { ok: true, preferredMode: 'native', host: { platform: process.platform, arch: process.arch, node: process.version },
+    return { ok: true, backend: gatewayBackend, preferredMode: 'native', host: { platform: process.platform, arch: process.arch, node: process.version },
       current: { httpUrl: c.onebot?.httpUrl || '', wsUrl: c.onebot?.wsUrl || '', hasToken: Boolean(c.onebot?.accessToken || c.onebot?.wsAccessToken), model: c.llm?.models?.chat || c.llm?.model || '', baseUrl: c.llm?.baseUrl || '', hasApiKey: Boolean(c.llm?.apiKey || process.env[envName] || envKey) },
       checks: [ { id: 'platform', label: 'Linux 原生运行环境', ok: process.platform === 'linux', detail: `${os.type()} ${process.arch}` },
-        { id: 'qq', label: '原版 Linux QQ', ok: qq, detail: qq ? `${qqPath} 已存在；仍需验证能启动和登录` : '未检测到 /opt/QQ/qq 或 /opt/snowluma/qq/qq；可按原生安装指南准备' },
-        { id: 'display', label: '桌面 / 无头扫码环境', ok: Boolean(process.env.DISPLAY) || xvfb, detail: process.env.DISPLAY ? '有 DISPLAY；仍需人工确认能显示 QQ' : xvfb ? 'Xvfb 命令存在；仍需配置并启动桌面和扫码' : '未检测到桌面；服务器需 Xvfb + 窗口管理器 + 受保护的远程桌面' },
+        { id: 'qq', label: '原版 Linux QQ', ok: qq, detail: qq ? `${qqPath} 已存在；仍需验证能启动和登录` : gatewayBackend === 'napcat' ? '未检测到 /opt/QQ/qq；请由管理员确认 NapCat 配套 Linux QQ 安装路径' : '未检测到 /opt/QQ/qq 或 /opt/snowluma/qq/qq；可按原生安装指南准备' },
+        ...(gatewayBackend === 'napcat' ? [] : [{ id: 'display', label: '桌面 / 无头扫码环境', ok: Boolean(process.env.DISPLAY) || xvfb, detail: process.env.DISPLAY ? '有 DISPLAY；仍需人工确认能显示 QQ' : xvfb ? 'Xvfb 命令存在；仍需配置并启动桌面和扫码' : '未检测到桌面；服务器需 Xvfb + 窗口管理器 + 受保护的远程桌面' }]),
         { id: 'ffmpeg', label: '动图 / 视频抽帧', ok: ffmpeg, detail: ffmpeg ? 'ffmpeg 可用' : '缺少 ffmpeg；静态识图不受影响' } ],
-      links: UPSTREAM, native: { service: nativeService, scope: nativeScope },
-      automaticInstall: { available: false, scriptAvailable: true, guide: 'https://github.com/oka-rin/dsh-qq/blob/main/docs/native.md', script: 'https://github.com/oka-rin/dsh-qq/blob/main/scripts/install-native.sh', planCommand: 'bash scripts/install-native.sh --plan', reason: '提供宿主机管理员主动执行的可审查原生安装脚本；网页不会代运行 sudo、接受上游协议、扫码或停用 Docker。先预览计划并阅读上游条款，再按指南明确确认安装。' } };
+      links: gatewayBackend === 'napcat' ? { release: 'https://github.com/NapNeko/NapCatQQ/releases', manual: 'https://napneko.github.io/', qq: UPSTREAM.qq } : UPSTREAM, native: { service: nativeService, scope: nativeScope },
+      automaticInstall: gatewayBackend === 'napcat' ? { available: false, scriptAvailable: false, reason: '由宿主管理员安装 NapCat 和 Linux QQ；本页面仅连接已安装的服务，扫码使用 NapCat 官方 WebUI。' } : { available: false, scriptAvailable: true, guide: 'https://github.com/oka-rin/dsh-qq/blob/main/docs/native.md', script: 'https://github.com/oka-rin/dsh-qq/blob/main/scripts/install-native.sh', planCommand: 'bash scripts/install-native.sh --plan', reason: '提供宿主机管理员主动执行的可审查原生安装脚本；网页不会代运行 sudo、接受上游协议、扫码或停用 Docker。先预览计划并阅读上游条款，再按指南明确确认安装。' } };
   }
   return { status, check, connect };
 }

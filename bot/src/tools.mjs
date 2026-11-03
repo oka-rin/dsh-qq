@@ -358,7 +358,8 @@ export const TOOLS = [
         group_id: { type: 'number', description: '群号' },
         album_id: { type: 'string', description: 'media/upload/like：相册 ID' },
         file: { type: 'string', description: 'upload：图片/视频地址' },
-        text: { type: 'string', description: 'upload：配文' },
+        media_type: { type: 'string', enum: ['image', 'video'], description: 'upload：默认为图片；上传视频必须显式设 video，不根据文件名猜测' },
+        text: { type: 'string', description: 'upload：配文（NapCat 不支持，请省略并单独发送说明）' },
         album_name: { type: 'string', description: 'upload：相册名' },
         batch_id: { type: 'string', description: 'like：批次 ID（来自 media 列表）' },
       },
@@ -796,6 +797,7 @@ async function callTool(name, args = {}) {
           album_name: args.album_name ?? '',
           file: args.file,
           text: args.text,
+          ...(args.media_type !== undefined ? { media_type: args.media_type } : {}),
         }),
         like: () => raw('set_group_album_media_like', {
           group_id: args.group_id,

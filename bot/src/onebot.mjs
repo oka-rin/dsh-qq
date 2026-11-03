@@ -1,4 +1,5 @@
 import { createLogger, sleep } from './util.mjs';
+import { adaptOneBotRequest } from './onebot-compat.mjs';
 
 export class OneBotError extends Error {
   constructor(action, info) {
@@ -20,6 +21,7 @@ export class OneBotError extends Error {
  */
 export class OneBot {
   constructor(options = {}, { log = createLogger('onebot'), onStatus } = {}) {
+    this.gateway = options.gateway || 'snowluma';
     this.httpUrl = String(options.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     this.wsUrl = String(options.wsUrl || 'ws://127.0.0.1:3001/event');
     this.accessToken = options.accessToken || '';
@@ -61,16 +63,17 @@ export class OneBot {
   }
 
   /** 调用一个动作，成功返回 envelope.data，失败抛 OneBotError */
-  async call(action, params = {}, { timeoutMs = 30000 } = {}) {
+  async call(action, params = {}, { timeoutMs = 30000, mediaType } = {}) {
+    const request = adaptOneBotRequest(action, params, { gateway: this.gateway, selfNickname: this.state.nickname, mediaType });
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     this._inflight += 1;
     const startedAt = Date.now();
     try {
-      const res = await fetch(this.#url(action), {
+      const res = await fetch(this.#url(request.action), {
         method: 'POST',
         headers: this.#headers(),
-        body: JSON.stringify(params ?? {}),
+        body: JSON.stringify(request.params ?? {}),
         signal: ac.signal,
       });
       const body = await res.text();

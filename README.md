@@ -21,16 +21,10 @@
 ### 1. 准备好这三样
 
 - **DSH**，运行环境 Node.js **22.13 或更新版本**。
-- **SnowLuma / OneBot 后端**，拿到它的 HTTP、WebSocket 地址和 Token；QQ 须先人工登录，已有本机 QQ 窗口也可用面板的[登录入口](./docs/native.md#在插件内人工登录-qq)。
+- **NapCat / SnowLuma / OneBot 后端**，拿到 HTTP、正向 WebSocket 地址和 Token。NapCat 可直接在官方 WebUI 扫码，不需要 VNC。详见 [NapCat 接入](./docs/napcat.md)。
 - **模型接口**：OpenAI 兼容的接口地址、模型名和 API Key。
 
-**没有 QQ 后端？** Debian/Ubuntu + systemd 可使用仓库的[原生安装脚本与指南](./docs/native.md)，准备官方原版 SnowLuma **v2.4.0 完整包**和你提供的原版 QQ。先在仓库根目录预览：
-
-```bash
-bash scripts/install-native.sh --plan
-```
-
-默认只读；实际安装需显式确认、指定版本和 QQ 来源。脚本不代接受上游条款、不自动启动服务或扫码。安装后由你审核、启动并登录，再回来连接。也可按 [SnowLuma 官方指南](https://snowluma.github.io/zh/docs/guide/quickstart)自行部署；已有后端不用重装。
+**没有 QQ 后端？** 新部署建议按 [NapCat 官方指南](https://napneko.github.io/guide/napcat)安装并开启 OneBot HTTP / 正向 WS，再按本仓库 [NapCat 接入步骤](./docs/napcat.md)连接。插件不捆绑后端或代替你同意 QQ / 上游条款。既有 SnowLuma 无需强制迁移；旧 [SnowLuma 安装脚本与迁移指南](./docs/native.md)保留兼容，但**不是 NapCat 安装器**。
 
 ### 2. 安装插件
 
@@ -53,7 +47,9 @@ bash scripts/install-native.sh --plan
 
 示例端口不是固定要求，以你的后端设置为准。向导只直接连接本机后端；远程后端见[高级配置](./docs/advanced.md#首次配置向导)。
 
-**QQ 还没登录？** 点 **打开 QQ 登录页**：Docker 模式恢复使用已有 SnowLuma 原版 noVNC，可先点 **复制远程桌面密码**，再打开登录页，在原版 VNC 提示中粘贴 **VNC 密码（不是 QQ 密码）**，然后操作真实 QQ；原生模式如已由操作者部署原版 noVNC，可在插件配置设置 `snowLumaDesktopPort` 为该端口以沿用原版入口（默认 0 不启用）；未设置的原生 / external 模式仍使用现有登录桥接。DSH 认证只保护 Docker 的跳转入口，目标桌面依赖原版 VNC 密码和现有访问规则，不受 DSH Cookie 或 10 分钟会话限制保护。支持你已接受风险的普通 HTTP；原版提示 **“Connected (unencrypted)” 是传输未加密的警告，不是认证失败**，可继续操作，但画面和输入可能被窃听，可信 HTTPS 更安全，不强制改用 HTTPS/SSH。复制按钮仅在已认证浏览器中显式读取，普通 HTTP 也有兼容复制；权限被浏览器拒绝时可短时手动复制，界面临时值 30 秒后清除，不写入模型工具或日志。不要把 VNC 或 QQ 密码发到聊天里。入口不会启动后端、接受条款或完成迁移；详见[登录说明](./docs/native.md#在插件内人工登录-qq)。
+**NapCat 还没登录？** 在插件配置选择 `gatewayBackend: napcat`，填好服务名、WebUI 端口与私有配置文件路径；点 **复制 NapCat 登录令牌**，再打开官方 WebUI，粘贴令牌后扫描 QQ 登录二维码。普通 HTTP 可用，但令牌和扫码信息仍可能被窃听；页面依赖 NapCat 自身鉴权，不继承 DSH 会话。不要把令牌或密码发到聊天。然后将机器人「连接」里的 `onebot.gateway` 设为 `napcat` 并填写实际 HTTP / WS 地址，检测并重启。
+
+**既有 SnowLuma 登录**：点 **打开 QQ 登录页**；Docker 模式恢复使用已有 SnowLuma 原版 noVNC，可先点 **复制远程桌面密码**，再打开登录页，在原版 VNC 提示中粘贴 **VNC 密码（不是 QQ 密码）**，然后操作真实 QQ；原生模式如已由操作者部署原版 noVNC，可在插件配置设置 `snowLumaDesktopPort` 为该端口以沿用原版入口（默认 0 不启用）；未设置的原生 / external 模式仍使用现有登录桥接。DSH 认证只保护 Docker 的跳转入口，目标桌面依赖原版 VNC 密码和现有访问规则，不受 DSH Cookie 或 10 分钟会话限制保护。支持你已接受风险的普通 HTTP；原版提示 **“Connected (unencrypted)” 是传输未加密的警告，不是认证失败**，可继续操作，但画面和输入可能被窃听，可信 HTTPS 更安全，不强制改用 HTTPS/SSH。复制按钮仅在已认证浏览器中显式读取，普通 HTTP 也有兼容复制；权限被浏览器拒绝时可短时手动复制，界面临时值 30 秒后清除，不写入模型工具或日志。不要把 VNC 或 QQ 密码发到聊天里。入口不会启动后端、接受条款或完成迁移；详见[登录说明](./docs/native.md#在插件内人工登录-qq)。
 
 点击 **检测 OneBot 连接 → 检测成功，保存接入配置**，然后到「运维」**重启机器人**。这一步只检测 QQ 连接，模型是否可用要靠下一步试聊确认。
 
@@ -89,4 +85,4 @@ bash scripts/install-native.sh --plan
 - [原生安装与 Docker 迁移](./docs/native.md)：只读预览、显式安装、受保护的登录、切换与回滚。
 - [高级配置与运维](./docs/advanced.md)：配置字段、systemd、Docker、数据目录和安全边界。
 - [参与开发](./CONTRIBUTING.md) · [报告安全问题](./SECURITY.md) · [更新记录](./CHANGELOG.md)
-- 源码采用 [MIT](./LICENSE)。SnowLuma、QQ 和模型服务遵循各自条款；插件安装或连接不会隐式运行后端安装脚本。
+- 源码采用 [MIT](./LICENSE)。NapCat、SnowLuma、QQ 和模型服务遵循各自条款；插件安装或连接不会隐式运行后端安装脚本。
