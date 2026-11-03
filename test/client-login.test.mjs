@@ -24,6 +24,13 @@ test('login URL is exact and mount-prefixed once, for numeric and ISO expiry', (
   }
 });
 
+test('original SnowLuma hop is exact, mount-preserving and never an arbitrary redirect', () => {
+  assert.equal(desktopViewPath({ ...success(), url: '/dsh-qq/login/original' }, '/dsh'), '/dsh/dsh-qq/login/original');
+  for (const url of ['/dsh-qq/login/original?url=evil', '//evil.test', 'http://evil.test:6081/vnc.html']) {
+    assert.throws(() => desktopViewPath({ ...success(), url }, '/dsh'), /desktopInvalid/);
+  }
+});
+
 test('navigation awaits successful POST and uses the current tab destination', async () => {
   let resolvePost;
   const calls = [];

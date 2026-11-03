@@ -52,7 +52,7 @@ function body(req, signal) {
 }
 
 /** Browser-only credential surfaces; never register these operations as model tools. */
-export function registerLoginHttp({ ctx, login, desktop, assetPath }) {
+export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogin = null }) {
   let session = null, busy = false, disposed = false;
   const requests = new Set();
   const send = (res, status, value, extra = {}) => {
@@ -101,11 +101,26 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath }) {
     send(res, 200, value);
   });
 
+  // Docker deployments already provide the original SnowLuma noVNC desktop.
+  // Only advertise this fixed authenticated hop; never accept a redirect URL
+  // from the browser, and never read or forward the original VNC password.
+  exact('/original', async (req, res, signal) => {
+    if (req.method !== 'GET' || !originalLogin) throw new Error('原版 SnowLuma 网页桌面未配置');
+    const target = await until(originalLogin.target({ signal }), signal);
+    const location = originalLogin.redirect(req, target);
+    res.writeHead(302, { ...HEADERS, location }); res.end();
+  });
+
   exact('/desktop/session', async (req, res, signal) => {
     mutation(req);
     const input = await body(req, signal);
     if (Object.keys(input).length) throw new Error('桌面请求不接受参数');
     if (signal.aborted) throw cancelled();
+    if (originalLogin) {
+      await until(originalLogin.target({ signal }), signal); // Verify the original service, without starting a substitute.
+      send(res, 200, { ok: true, url: ROOT + '/original', expiresAt: Date.now() + 120000, provider: 'snowluma-original' });
+      return;
+    }
     const origin = new URL(req.headers.origin);
     if (busy || (session && Date.now() < session.expiresAt && !owner(req))) throw new Error('已有另一个 QQ 登录窗口，请先关闭或等待过期');
     busy = true;
@@ -156,6 +171,6 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath }) {
     if (disposed) return;
     disposed = true;
     for (const ctrl of requests) ctrl.abort();
-    clear(); desktop.dispose(); login.dispose();
+    clear(); desktop.dispose(); login.dispose(); originalLogin?.dispose?.();
   } };
 }

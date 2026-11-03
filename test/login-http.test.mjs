@@ -36,7 +36,7 @@ async function fixture(t, options = {}) {
       registerUpgrade(route) { upgrades.set(route.path, route.handler); return () => upgrades.delete(route.path); },
     },
   };
-  const api = registerLoginHttp({ ctx, login, desktop, readBody: () => { throw new Error('must not use unbounded shared reader'); }, assetPath: fileURLToPath(new URL('../desktop-client.js', import.meta.url)) });
+  const api = registerLoginHttp({ ctx, login, desktop, originalLogin: options.originalLogin, readBody: () => { throw new Error('must not use unbounded shared reader'); }, assetPath: fileURLToPath(new URL('../desktop-client.js', import.meta.url)) });
   const server = http.createServer((req, res) => {
     // Emulate a mount proxy stripping /dsh before the carrier sees requests.
     req.url = req.url.replace(/^\/dsh(?=\/)/, '');
@@ -216,6 +216,32 @@ test('browser disconnect aborts status and cancels pending desktop start before 
   const q = await fixture(t, { login: { status: async options => { signal = options.signal; signal.addEventListener('abort', () => statusStopped.resolve(), { once: true }); statusEntered.resolve(); return new Promise(() => {}); } } });
   const status = http.request(q.origin + root + '/status', { headers: { 'x-auth': 'yes' } });
   status.on('error', () => {}); status.end(); await statusEntered.promise; status.destroy(); await statusStopped.promise; assert.equal(signal.aborted, true);
+});
+
+test('Docker original entry keeps DSH auth, never starts substitute desktop or exposes passwords', async t => {
+  let targets = 0, disposed = 0;
+  const f = await fixture(t, { originalLogin: {
+    target: async ({ signal }) => { assert.equal(signal.aborted, false); targets++; return { port: 6081, path: '/vnc.html?autoconnect=1&resize=scale' }; },
+    redirect: (_req, target) => `http://qq.example.test:${target.port}${target.path}`,
+    dispose: () => { disposed++; },
+  } });
+  assert.equal((await f.request('/original', { auth: false })).status, 401); assert.equal(targets, 0);
+  assert.equal((await f.request('/desktop/session', post({}, { origin: 'http://evil.test' }))).status, 403);
+  const ready = await f.request('/desktop/session', { ...post(), prefix: '/dsh' });
+  assert.equal(ready.status, 200); assert.equal(ready.json.url, '/dsh-qq/login/original');
+  assert.equal(ready.json.provider, 'snowluma-original'); assert.equal(ready.headers['set-cookie'], undefined);
+  assert.ok(!f.calls.some(([name]) => name === 'start'));
+  const hop = await f.request('/original', { prefix: '/dsh' });
+  assert.equal(hop.status, 302); assert.equal(hop.headers.location, 'http://qq.example.test:6081/vnc.html?autoconnect=1&resize=scale');
+  assert.equal(hop.headers['cache-control'], 'no-store'); assert.doesNotMatch(hop.headers.location, /password|token/);
+  assert.equal((await f.request('/original?url=http://evil.test')).status, 400);
+  f.dispose(); assert.equal(disposed, 1);
+});
+
+test('failed original service does not silently fall back to a substitute', async t => {
+  const f = await fixture(t, { originalLogin: { target: async () => { throw new Error('原版网页桌面不可连接'); } } });
+  const ready = await f.request('/desktop/session', post()); assert.equal(ready.status, 400);
+  assert.match(ready.json.error, /原版/); assert.ok(!f.calls.some(([name]) => name === 'start'));
 });
 
 test('WS wrapper catches backend exceptions and blocks revoked authentication and post-disposal callbacks', async t => {

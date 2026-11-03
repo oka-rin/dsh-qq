@@ -17,6 +17,7 @@ import { createSetup, nativeStatus, nativeServiceArgs } from './setup.js';
 import { createLogin } from './login.js';
 import { createDesktop } from './desktop.js';
 import { registerLoginHttp } from './login-http.js';
+import { createOriginalLogin, originalRedirect } from './original-login.js';
 import { fileURLToPath } from 'node:url';
 
 import Schema from '@deepseek-ai/schemastery';
@@ -573,7 +574,9 @@ export function apply(ctx, config = {}) {
     xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };
   const login = createLogin({ ...windowOptions, check: () => setup.check() });
   const desktop = createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
+  const original = createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer });
   const loginHttp = registerLoginHttp({ ctx, login, desktop, readBody,
+    originalLogin: cfg.snowLumaMode === 'docker' ? { target: (options) => original.target(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
     assetPath: path.join(PKG_DIR, 'assets/desktop-viewer.js') });
   const setupAction = async (action, input = {}) => {
     ensureDataDir();

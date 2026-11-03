@@ -102,12 +102,12 @@ window.__ModuleLoader__.load({
       setupIntro: '用可审查安装脚本准备宿主机原生 QQ 网关，手动启动后打开 QQ 登录页，再单独检测 OneBot 连接；网页不会代执行管理员命令。',
       setupManual: '先打开原生安装指南，审查脚本并预览计划；由宿主管理员安装依赖、原版 SnowLuma 和 QQ。到「运维」手动启动网关，再打开 QQ 登录页，亲自完成登录与协议确认。',
       setupConnect: '3 · 检测并保存本机连接',
-      loginTitle: '2 · QQ 登录', loginIntro: '在当前页打开宿主机上真实的 QQ 窗口，请本人直接在 QQ 中完成登录。不会自动启动网关或代接受协议；登录会话最长 10 分钟。',
+      loginTitle: '2 · QQ 登录', loginIntro: 'Docker 模式直接打开原 SnowLuma 网页桌面，请本人在真实 QQ 中登录；不会启动网关或代接受协议。其他模式使用短时 QQ 窗口。',
       loginLoggedIn: '已配置网关在线', loginWaiting: '已配置网关未登录', loginUnavailable: '网关状态不可用', loginUnknown: '网关状态未确认',
       loginCheck: '刷新网关状态', loginChecking: '检查中…', loginFailed: '无法确认网关状态，请刷新重试。',
       loginSeparate: '这是当前已配置网关的状态，不代表登录页中所选 QQ 实例；登录后仍需完成下方独立连接检测。',
       desktopOpen: '打开 QQ 登录页', desktopOpening: '正在打开登录页…',
-      desktopPrivate: '密码只在 QQ 窗口输入，不要发给模型或聊天。',
+      desktopPrivate: '原版桌面若询问 VNC 密码，请输入原桌面访问密码（不是 QQ 密码）；QQ 密码只在 QQ 中输入，不要发到聊天。原版桌面沿用其自身访问保护。',
       desktopHttpWarning: '普通 HTTP 未加密，画面和键盘输入可能被读取或篡改；仅在可信网络使用。',
       desktopFailed: '无法打开 QQ 登录页，请检查已运行的 QQ 与远程桌面依赖后重试。',
       desktopInvalid: '宿主返回的登录页地址或到期时间无效，请重试。',
@@ -116,12 +116,12 @@ window.__ModuleLoader__.load({
       setupIntro: 'Prepare the native QQ gateway with the reviewable host installer, start it manually, then open QQ login and test OneBot separately. This page does not execute administrator commands.',
       setupManual: 'Open the native guide, review the installer and preview its plan. A host administrator installs dependencies and original SnowLuma/QQ. Start the gateway manually in Operations, then open QQ login and personally complete login and agreements.',
       setupConnect: '3 · Test & save a local connection',
-      loginTitle: '2 · QQ login', loginIntro: 'Open the real QQ window on the host in this tab and log in personally inside QQ. This does not start the gateway or accept agreements. Login sessions last up to 10 minutes.',
+      loginTitle: '2 · QQ login', loginIntro: 'Docker mode opens the original SnowLuma web desktop. Log in personally inside QQ; no gateway startup or agreement acceptance. Other modes use the short-lived QQ window.',
       loginLoggedIn: 'Configured gateway online', loginWaiting: 'Configured gateway not logged in', loginUnavailable: 'Gateway status unavailable', loginUnknown: 'Gateway status unverified',
       loginCheck: 'Refresh gateway status', loginChecking: 'Checking…', loginFailed: 'Could not verify gateway status. Refresh to retry.',
       loginSeparate: 'This is the configured gateway’s status, not verification of the QQ instance selected on the login page. Test the connection separately below after login.',
       desktopOpen: 'Open QQ login page', desktopOpening: 'Opening login page…',
-      desktopPrivate: 'Enter passwords only inside QQ, never in chat or to the model.',
+      desktopPrivate: 'The original desktop may request its VNC access password, not your QQ password. Enter QQ passwords only inside QQ, never in chat. The original desktop retains its own access protection.',
       desktopHttpWarning: 'Plain HTTP is unencrypted: screen and keyboard input may be read or altered. Use only on a trusted network.',
       desktopFailed: 'Could not open QQ login. Check the running QQ client and remote-desktop dependencies, then retry.',
       desktopInvalid: 'The Host returned an invalid login-page path or expiry. Please retry.',
@@ -763,7 +763,7 @@ window.__ModuleLoader__.load({
     // Only this exact relative URL is accepted; the public mount is resolved above.
     function desktopViewPath(result, mount, now = Date.now()) {
       const expires = typeof result?.expiresAt === 'number' ? result.expiresAt : Date.parse(result?.expiresAt);
-      if (result?.url !== '/dsh-qq/login/desktop/view' || !Number.isFinite(expires) || expires <= now) {
+      if (!['/dsh-qq/login/desktop/view', '/dsh-qq/login/original'].includes(result?.url) || !Number.isFinite(expires) || expires <= now) {
         throw new Error(tr('desktopInvalid'));
       }
       return mount + result.url;
