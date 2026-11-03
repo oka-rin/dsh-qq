@@ -1,0 +1,21 @@
+node_modules/
+data/
+**/data/
+.env
+.env.*
+!.env.example
+config.json
+config.local.json
+config.*.local.json
+*.log
+*.jsonl
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.bak*
+# Setup backups contain the original configuration and credentials.
+*.before-setup-*
+*.tgz
+coverage/
+.DS_Store

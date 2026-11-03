@@ -1,0 +1,1067 @@
+{
+ "get_login_info": {
+  "summary": "基本调用",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_status": {
+  "summary": "基本调用",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_version_info": {
+  "summary": "基本调用",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "can_send_image": {
+  "summary": "基本调用",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "can_send_record": {
+  "summary": "基本调用",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "send_custom_face": {
+  "summary": "发送账号收藏表情（emoji_id 或 MD5），保留表情显示样式",
+  "params": [
+   "notes",
+   "emoji_id",
+   "group_id",
+   "user_id",
+   "reply_to"
+  ]
+ },
+ "send_msg": {
+  "summary": "发送消息（按 message_type/群号 自动路由群聊或私聊）",
+  "params": [
+   "notes",
+   "message",
+   "message_type",
+   "group_id",
+   "user_id",
+   "auto_escape"
+  ]
+ },
+ "send_private_msg": {
+  "summary": "发送私聊消息",
+  "params": [
+   "notes",
+   "user_id",
+   "message",
+   "group_id",
+   "auto_escape"
+  ]
+ },
+ "get_msg": {
+  "summary": "获取消息",
+  "params": [
+   "notes",
+   "allOf",
+   "description"
+  ]
+ },
+ "delete_msg": {
+  "summary": "撤回消息",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_friend_list": {
+  "summary": "获取好友列表",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "get_stranger_info": {
+  "summary": "获取陌生人信息",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "delete_friend": {
+  "summary": "删除好友",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_group_list": {
+  "summary": "获取群列表",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "get_group_system_msg": {
+  "summary": "获取群系统消息",
+  "params": [
+   "notes",
+   "type",
+   "items"
+  ]
+ },
+ "get_group_tags": {
+  "summary": "读取某个群分类下的资料标签",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "add_group_tag": {
+  "summary": "向某个群分类添加资料标签",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "delete_group_tag": {
+  "summary": "从某个群分类移除资料标签",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_group_anonymous": {
+  "summary": "匿名开关（未实现，返回 ok）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_group_anonymous_ban": {
+  "summary": "匿名禁言（未实现，返回 ok）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "upload_private_file": {
+  "summary": "上传私聊文件",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_private_file_url": {
+  "summary": "获取私聊文件下载链接",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "set_friend_add_request": {
+  "summary": "处理好友添加请求",
+  "params": [
+   "flag",
+   "approve"
+  ]
+ },
+ "set_group_add_request": {
+  "summary": "处理加群请求",
+  "params": [
+   "flag",
+   "sub_type",
+   "approve"
+  ]
+ },
+ "send_like": {
+  "summary": "点赞",
+  "params": [
+   "type",
+   "description"
+  ]
+ },
+ "friend_poke": {
+  "summary": "好友拍一拍",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "send_poke": {
+  "summary": "拍一拍（群聊/私聊自动路由）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_essence_msg": {
+  "summary": "设置精华消息",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "delete_essence_msg": {
+  "summary": "移除精华消息",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_group_reaction": {
+  "summary": "群聊表情回应",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "delete_custom_face": {
+  "summary": "删除收藏表情",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "add_custom_face": {
+  "summary": "添加收藏表情",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "modify_custom_face": {
+  "summary": "修改收藏表情备注",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "move_custom_face_to_front": {
+  "summary": "收藏表情移到最前",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_friend_msg_history": {
+  "summary": "获取好友消息历史（无锚点时从服务器获取最新双向记录）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "mark_group_msg_as_read": {
+  "summary": "标记群消息已读",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "mark_private_msg_as_read": {
+  "summary": "标记私聊消息已读",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "mark_msg_as_read": {
+  "summary": "标记消息已读（群聊/私聊自动路由）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "upload_forward_msg": {
+  "summary": "上传转发消息",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "upload_foward_msg": {
+  "summary": "上传转发消息（别名拼写）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_image": {
+  "summary": "获取图片信息",
+  "params": [
+   "notes",
+   "file",
+   "file_id"
+  ]
+ },
+ "get_record": {
+  "summary": "获取语音信息；传 out_format 则服务端转码并附带 base64",
+  "params": [
+   "notes",
+   "allOf",
+   "description"
+  ]
+ },
+ "get_cookies": {
+  "summary": "获取语音转文字结果",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_csrf_token": {
+  "summary": "获取 CSRF 令牌",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_credentials": {
+  "summary": "获取凭证",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "set_restart": {
+  "summary": "重启（不支持）",
+  "params": [
+   "notes",
+   "not",
+   "description"
+  ]
+ },
+ "clean_cache": {
+  "summary": "清理缓存",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_friend_remark": {
+  "summary": "设置好友备注",
+  "params": [
+   "type",
+   "description"
+  ]
+ },
+ "set_group_remark": {
+  "summary": "设置群备注",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_msg_emoji_like": {
+  "summary": "设置消息表情回应",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "_mark_all_as_read": {
+  "summary": "标记全部已读",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "check_url_safely": {
+  "summary": "检查链接安全性",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "set_qq_profile": {
+  "summary": "设置 QQ 资料",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_online_status": {
+  "summary": "设置在线状态",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_diy_online_status": {
+  "summary": "设置自定义在线状态",
+  "params": [
+   "type",
+   "description"
+  ]
+ },
+ "get_group_ignored_notifies": {
+  "summary": "获取被过滤的入群请求",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "get_group_ignore_add_request": {
+  "summary": "获取被忽略的入群请求（NapCat）",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "forward_friend_single_msg": {
+  "summary": "转发单条消息给好友",
+  "params": [
+   "notes",
+   "message_id",
+   "user_id"
+  ]
+ },
+ "forward_group_single_msg": {
+  "summary": "转发单条消息到群",
+  "params": [
+   "notes",
+   "message_id",
+   "group_id"
+  ]
+ },
+ "get_profile_like": {
+  "summary": "获取资料点赞",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "fetch_custom_face": {
+  "summary": "获取自定义表情",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "fetch_custom_face_detail": {
+  "summary": "获取自定义表情详情",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "get_emoji_likes": {
+  "summary": "获取表情回应用户",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "fetch_emoji_like": {
+  "summary": "获取表情回应用户（NapCat 分页）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_msg_emoji_likes": {
+  "summary": "获取一条消息的全部表情回应",
+  "params": [
+   "notes",
+   "type",
+   "items"
+  ]
+ },
+ "get_friends_with_category": {
+  "summary": "获取分组好友列表",
+  "params": [
+   "type",
+   "description",
+   "items"
+  ]
+ },
+ "set_friends_category": {
+  "summary": "移动好友到指定分组",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_recent_contact": {
+  "summary": "获取最近会话（占位）",
+  "params": [
+   "type",
+   "description"
+  ]
+ },
+ "get_online_clients": {
+  "summary": "获取在线客户端",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "_get_model_show": {
+  "summary": "获取机型展示（兼容 mock）",
+  "params": [
+   "notes",
+   "type",
+   "items"
+  ]
+ },
+ "_set_model_show": {
+  "summary": "设置机型展示（占位）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_unidirectional_friend_list": {
+  "summary": "获取单向好友列表",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "get_clientkey": {
+  "summary": "获取 clientkey",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "share_peer": {
+  "summary": "分享用户/群 Ark 卡片",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "send_ark_share": {
+  "summary": "分享用户/群 Ark 卡片（NapCat 标准名）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "send_tuwen_ark": {
+  "summary": "发送图文 Ark 卡片（私聊/群聊）",
+  "params": [
+   "notes",
+   "user_id",
+   "group_id",
+   "title",
+   "desc",
+   "summary",
+   "preview_url",
+   "jump_url"
+  ]
+ },
+ "share_group_ex": {
+  "summary": "分享群 Ark 卡片",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "send_group_ark_share": {
+  "summary": "分享群 Ark 卡片（NapCat 标准名）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_doubt_friends_add_request": {
+  "summary": "获取可疑好友申请",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "set_doubt_friends_add_request": {
+  "summary": "处理可疑好友申请",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "get_collection_list": {
+  "summary": "获取收藏列表",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "create_collection": {
+  "summary": "创建收藏（未实现）",
+  "params": [
+   "notes",
+   "not",
+   "description"
+  ]
+ },
+ "set_qq_avatar": {
+  "summary": "分词（未实现）",
+  "params": [
+   "notes",
+   "not",
+   "description"
+  ]
+ },
+ "set_input_status": {
+  "summary": "设置输入状态",
+  "params": [
+   "type",
+   "properties",
+   "additionalProperties",
+   "description"
+  ]
+ },
+ "get_group_info_ex": {
+  "summary": "获取群信息（扩展）",
+  "params": [
+   "notes",
+   "group_id",
+   "no_cache"
+  ]
+ },
+ "get_group_detail_info": {
+  "summary": "获取群详细信息",
+  "params": [
+   "notes",
+   "group_id",
+   "no_cache"
+  ]
+ },
+ "trans_group_file": {
+  "summary": "转存群文件",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_file": {
+  "summary": "获取文件信息（仅图片/语音缓存；群文件请用 get_group_file_url）",
+  "params": [
+   "notes",
+   "file_id",
+   "file"
+  ]
+ },
+ "bot_exit": {
+  "summary": "退出机器人",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "nc_get_packet_status": {
+  "summary": "获取 packet 状态（占位）",
+  "params": [
+   "type",
+   "description"
+  ]
+ },
+ "nc_get_user_status": {
+  "summary": "获取用户在线/扩展状态",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "request_decrypt_key": {
+  "summary": "请求数据库解密密钥",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_rkey_server": {
+  "summary": "获取下载 rkey",
+  "params": [
+   "notes",
+   "type",
+   "items"
+  ]
+ },
+ "_del_group_notice": {
+  "summary": "OCR 图片（服务端，需图片 URL 或已缓存的图片 file_id）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "send_forward_msg": {
+  "summary": "发送合并转发（按 message_type/群号自动路由）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "send_private_forward_msg": {
+  "summary": "发送私聊合并转发",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_forward_msg": {
+  "summary": "获取合并转发消息（id 或 message_id）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "download_file": {
+  "summary": "下载文件（url 或 base64）到 data/downloads",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "translate_en2zh": {
+  "summary": "英译中",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "set_self_longnick": {
+  "summary": "设置个性签名（longNick/long_nick，严格 string）",
+  "params": [
+   "type",
+   "properties",
+   "additionalProperties",
+   "description"
+  ]
+ },
+ "get_mini_app_ark": {
+  "summary": "获取小程序卡片 ark",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_group_todo_list": {
+  "summary": "发送原始 SSO 包（cmd + hex data）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "create_flash_task": {
+  "summary": "创建闪传任务",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_fileset_info": {
+  "summary": "获取文件集信息",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_flash_file_list": {
+  "summary": "获取闪传文件列表",
+  "params": [
+   "notes",
+   "type",
+   "items"
+  ]
+ },
+ "list_filesets": {
+  "summary": "列出当前账号的所有闪传文件集",
+  "params": [
+   "type",
+   "items"
+  ]
+ },
+ "get_flash_file_url": {
+  "summary": "获取闪传文件链接",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_share_link": {
+  "summary": "获取文件分享链接",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "delete_flash_file": {
+  "summary": "删除闪传文件",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "rename_flash_file": {
+  "summary": "重命名闪传文件",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "download_fileset": {
+  "summary": "解析闪传文件下载直链（不下载，由调用方实现下载）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "send_flash_msg": {
+  "summary": "发送闪传消息（私聊或群聊，引用 fileset_id 让对端下载）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_fileset_id": {
+  "summary": "从 QQ 闪传分享码或官方分享链接获取 fileset_id",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "_get_friend_dress": {
+  "summary": "获取指定 QQ 号正在使用的个性装扮（挂件/名片/来电/输入状态等）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_qzone_msg_list": {
+  "summary": "获取 QQ 空间说说列表（默认机器人自己的空间）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_qzone_msg_detail": {
+  "summary": "获取 QQ 空间说说详情与一页评论（含服务端内联回复，需有访问权限）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "get_qzone_feeds": {
+  "summary": "获取 QQ 空间好友动态首页及结构化内容",
+  "params": [
+   "notes"
+  ]
+ },
+ "send_qzone_msg": {
+  "summary": "发表说说（QQ 空间，支持纯文字或带图；传 images 自动上传；可设置查看权限）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "delete_qzone_msg": {
+  "summary": "删除一条说说（QQ 空间，按 tid）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "set_qzone_msg_right": {
+  "summary": "修改一条已发说说的查看权限（QQ 空间，按 tid）",
+  "params": [
+   "notes",
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "like_qzone": {
+  "summary": "给一条说说点赞（QQ 空间）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "unlike_qzone": {
+  "summary": "取消对一条说说的点赞（QQ 空间；取消赞端点待真机核实）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "comment_qzone": {
+  "summary": "评论一条说说（QQ 空间，支持纯文字或带图；传 images 自动上传）",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "set_qzone_ban": {
+  "summary": "拉黑或解除拉黑某人（修改机器人自身 QQ 空间黑名单；enable=true 拉黑，false 解除）",
+  "params": [
+   "notes",
+   "type",
+   "description"
+  ]
+ },
+ "clean_stream_temp_file": {
+  "summary": "清理流式传输临时文件(仅清理 stream 上传/下载目录)",
+  "params": [
+   "message",
+   "removed",
+   "freed_bytes",
+   "skipped_active"
+  ]
+ },
+ "fetch_sys_faces": {
+  "summary": "获取 QQ 系统表情目录",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "fetch_face_entity": {
+  "summary": "按编号查询 QQ 系统表情",
+  "params": [
+   "face_id",
+   "refresh"
+  ]
+ },
+ "search_sys_faces": {
+  "summary": "搜索 QQ 系统表情",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ },
+ "fetch_super_face_id": {
+  "summary": "判断 QQ 系统表情是否使用超级表情格式",
+  "params": [
+   "type",
+   "properties",
+   "required"
+  ]
+ }
+}

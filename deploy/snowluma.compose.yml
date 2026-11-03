@@ -1,0 +1,39 @@
+# External backend template, not a bundled image or an automatic installation.
+# Review your chosen image's license, deployment permissions and documentation first.
+# Set SNOWLUMA_IMAGE to a verified image reference, preferably pinned by digest.
+services:
+  snowluma:
+    image: "${SNOWLUMA_IMAGE:?Set SNOWLUMA_IMAGE to an authorized SnowLuma image reference}"
+    container_name: "${SNOWLUMA_CONTAINER:-snowluma}"
+    restart: unless-stopped
+    shm_size: 1g
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 1048576
+    # SnowLuma's QQ injection may need these; review the image documentation.
+    # These weaken container isolation. Do not run untrusted images with them.
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      SNOWLUMA_WEBUI_HOST: 0.0.0.0
+      SNOWLUMA_WEBUI_PORT: "5099"
+      SNOWLUMA_QQ_FLAGS: --disable-gpu --disable-software-rasterizer --disable-gpu-compositing
+    ports:
+      - "127.0.0.1:${SNOWLUMA_HTTP_PORT:-3000}:3000"
+      - "127.0.0.1:${SNOWLUMA_WS_PORT:-3001}:3001"
+      - "127.0.0.1:${SNOWLUMA_WEBUI_PORT:-5099}:5099"
+      - "127.0.0.1:${SNOWLUMA_DESKTOP_PORT:-6081}:6081"
+    volumes:
+      - qq-gateway-data:/app/data
+      - qq-client-config:/app/.config
+      - qq-client-data:/app/.local/share
+volumes:
+  qq-gateway-data:
+    name: qq-gateway-data
+  qq-client-config:
+    name: qq-client-config
+  qq-client-data:
+    name: qq-client-data

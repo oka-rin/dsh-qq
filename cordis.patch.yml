@@ -1,0 +1,8 @@
+# 一个插件包提供机器人、面板和 qq_* 工具；SnowLuma/QQ 协议端仍是外部服务。
+- insert:
+    - id: dsh-qq
+      name: 'dsh-qq'
+      config:
+        # 不填 = 用包内自带的 bot/，数据放 $DSH_HOME/storage/dsh-qq
+        # 想接已有的 snowluma-qq 目录就把 botDir / dataDir 指过去
+        manageBot: true

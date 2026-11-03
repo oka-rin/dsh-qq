@@ -1,0 +1,59 @@
+{
+  "name": "dsh-qq",
+  "version": "0.2.2",
+  "description": "QQ bot integration for DeepSeek Harness: bundled bot, SnowLuma/OneBot connection, control panel and QQ tools. SnowLuma itself is external.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "runtime.js",
+    "setup.js",
+    "deploy/*.yml",
+    "cordis.patch.yml",
+    "bot/src/*.mjs",
+    "bot/test/*.test.mjs",
+    "bot/package.json",
+    "bot/config.example.json",
+    "bot/snowluma-api-catalog.json",
+    "locale/*.json",
+    "scripts/*.mjs",
+    "test/*.test.mjs",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "test:release": "node --test test/*.test.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "pack:check": "npm run check:release",
+    "prepack": "npm run check:release"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": ["slots", "locale"],
+      "external": ["react"]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "keywords": ["dsh-plugin", "deepseek-harness", "qq", "qqbot", "snowluma", "onebot", "chatbot"]
+}
