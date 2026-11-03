@@ -253,7 +253,10 @@ import os, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 for p in [root, *root.rglob('*')]:
     os.chown(p, 0, 0, follow_symlinks=False)
-    if not p.is_symlink(): os.chmod(p, p.stat().st_mode & 0o755)
+    # cp -a preserves the private staging root's 0700 mode onto the published
+    # destination. Every code directory must be traversable by the service user;
+    # files retain original ordinary bits without group/world write or setid.
+    if not p.is_symlink(): os.chmod(p, 0o755 if p.is_dir() else p.stat().st_mode & 0o755)
 PY
 install -d -o snowluma -g snowluma -m 0700 "$home" "$home/gateway" "$home/gateway/config" "$home/.config" "$home/.local" "$home/.local/share"
 python3 - "$home/gateway/config" "$home/.Xauthority" <<'PY'

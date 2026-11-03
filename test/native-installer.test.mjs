@@ -145,6 +145,37 @@ test('tar precheck rejects traversal, absolute, hardlink, devices, escaping link
   assert.equal(fs.readFileSync(path.join(deb.output, 'opt/QQ/qq'), 'utf8'), 'ok');
   assert.equal(fs.existsSync(path.join(deb.output, 'usr')), false);
 });
+test('published code is traversable after cp preserves private source directory modes', t => {
+  const dir = fixture(t);
+  const bundle = path.join(dir, 'bundle'), qq = path.join(dir, 'QQ'), runtime = path.join(dir, 'runtime');
+  fs.mkdirSync(bundle, { mode: 0o700 });
+  fs.mkdirSync(path.join(bundle, 'native'), { mode: 0o700 });
+  fs.mkdirSync(qq, { mode: 0o700 });
+  fs.mkdirSync(runtime, { mode: 0o755 });
+  fs.writeFileSync(path.join(bundle, 'node'), '#!/bin/sh\nprintf "fixture node\\n"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bundle, 'check-node-version.cjs'), 'fixture checker', { mode: 0o644 });
+  fs.writeFileSync(path.join(bundle, 'native/hook.so'), 'fixture addon', { mode: 0o644 });
+  fs.chmodSync(path.join(bundle, 'native/hook.so'), 0o666);
+  fs.writeFileSync(path.join(qq, 'qq'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.chmodSync(path.join(qq, 'qq'), 0o6755);
+  for (const [from, to] of [[bundle, runtime], [qq, path.join(runtime, 'qq')]]) {
+    fs.mkdirSync(to, { recursive: true, mode: 0o755 });
+    const copied = spawnSync('cp', ['-a', '--no-preserve=ownership,xattr', '--', `${from}/.`, `${to}/`], { encoding: 'utf8' });
+    assert.equal(copied.status, 0, copied.stderr);
+    assert.equal(fs.statSync(to).mode & 0o7777, 0o700, 'cp must reproduce the private-root regression');
+  }
+  // Exercise the actual publication hardening; ownership is deliberately mocked
+  // so this fixture requires neither root nor any persistent installation change.
+  const code = `import os\nos.chown = lambda p, uid, gid, **kw: None\n${pythonBlock('python3 - "$runtime"')}`;
+  const hardened = spawnSync('python3', ['-c', code, runtime], { encoding: 'utf8' });
+  assert.equal(hardened.status, 0, hardened.stderr);
+  for (const name of ['', 'native', 'qq']) assert.equal(fs.statSync(path.join(runtime, name)).mode & 0o7777, 0o755, name);
+  for (const name of ['check-node-version.cjs', 'native/hook.so']) assert.equal(fs.statSync(path.join(runtime, name)).mode & 0o7777, 0o644, name);
+  for (const name of ['node', 'qq/qq']) assert.equal(fs.statSync(path.join(runtime, name)).mode & 0o7777, 0o755, name);
+  const executed = spawnSync(path.join(runtime, 'node'), [], { encoding: 'utf8' });
+  assert.equal(executed.status, 0, executed.stderr);
+  assert.equal(executed.stdout, 'fixture node\n');
+});
 test('generated initial config uses private fresh token, loopback and disabled auto-injection', t => {
   const dir = fixture(t);
   const code = pythonBlock('python3 - "$home/gateway/config"').split('subprocess.run(')[0];
