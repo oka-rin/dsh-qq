@@ -576,7 +576,7 @@ export function apply(ctx, config = {}) {
   const desktop = createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
   const original = createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer });
   const loginHttp = registerLoginHttp({ ctx, login, desktop, readBody,
-    originalLogin: cfg.snowLumaMode === 'docker' ? { target: (options) => original.target(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
+    originalLogin: cfg.snowLumaMode === 'docker' ? { target: (options) => original.target(options), password: (options) => original.password(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
     assetPath: path.join(PKG_DIR, 'assets/desktop-viewer.js') });
   const setupAction = async (action, input = {}) => {
     ensureDataDir();

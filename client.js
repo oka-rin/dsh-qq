@@ -111,6 +111,13 @@ window.__ModuleLoader__.load({
       desktopHttpWarning: '普通 HTTP 未加密，画面和键盘输入可能被读取或篡改；仅在可信网络使用。',
       desktopFailed: '无法打开 QQ 登录页，请检查已运行的 QQ 与远程桌面依赖后重试。',
       desktopInvalid: '宿主返回的登录页地址或到期时间无效，请重试。',
+      desktopCopy: '复制远程桌面密码', desktopCopying: '正在获取并复制…', desktopCopied: '远程桌面密码已复制',
+      desktopCopyRetry: '再次复制', desktopCopyReveal: '显示并选中以手动复制', desktopCopyField: '远程桌面 VNC 密码（只读）',
+      desktopCopyNote: '这是远程桌面 VNC 密码，不是 QQ 密码。仅点击时获取；页面内存最多保留 30 秒，离开即清除。不会自动清空剪贴板，以免覆盖你后来复制的内容。',
+      desktopCopyFallback: '浏览器未允许自动复制。请在 30 秒内点击「再次复制」，或显示选中后手动复制。',
+      desktopCopyFailed: '无法获取远程桌面密码', desktopCopyInvalid: '宿主未返回有效的远程桌面密码',
+      desktopCopyExpired: '页面内存中的密码已清除；需要时请重新点击「复制远程桌面密码」。',
+      desktopCopyDenied: '浏览器复制命令返回失败', desktopCopyUnavailable: '此页面无法使用安全剪贴板 API', desktopCopyTimeout: '剪贴板操作超时',
     });
     Object.assign(copy.en, {
       setupIntro: 'Prepare the native QQ gateway with the reviewable host installer, start it manually, then open QQ login and test OneBot separately. This page does not execute administrator commands.',
@@ -125,6 +132,13 @@ window.__ModuleLoader__.load({
       desktopHttpWarning: 'Plain HTTP is unencrypted: screen and keyboard input may be read or altered. Use only on a trusted network.',
       desktopFailed: 'Could not open QQ login. Check the running QQ client and remote-desktop dependencies, then retry.',
       desktopInvalid: 'The Host returned an invalid login-page path or expiry. Please retry.',
+      desktopCopy: 'Copy remote desktop password', desktopCopying: 'Fetching and copying…', desktopCopied: 'Remote desktop password copied',
+      desktopCopyRetry: 'Copy again', desktopCopyReveal: 'Reveal and select for manual copy', desktopCopyField: 'Remote desktop VNC password (read-only)',
+      desktopCopyNote: 'This is the remote desktop VNC password, not your QQ password. Fetched only on click; kept in page memory for at most 30 seconds and cleared on leaving. The clipboard is not auto-cleared, to avoid overwriting anything you copy later.',
+      desktopCopyFallback: 'The browser did not allow automatic copy. Click “Copy again” within 30 seconds, or reveal/select for manual copying.',
+      desktopCopyFailed: 'Could not get the remote desktop password', desktopCopyInvalid: 'The Host returned no valid remote desktop password',
+      desktopCopyExpired: 'The password was cleared from page memory. Click “Copy remote desktop password” again if needed.',
+      desktopCopyDenied: 'The browser copy command returned failure', desktopCopyUnavailable: 'Secure clipboard API is unavailable on this page', desktopCopyTimeout: 'Clipboard operation timed out',
     });
     let tr = (key) => copy.zh[key] || key;
 
@@ -760,6 +774,132 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function loginDetail(value, secret = '') {
+      let text = String(value || '');
+      if (secret) text = text.split(secret).join('[private password]');
+      return text.replace(/data:image\/[^\s]+/gi, '[private image]').slice(0, 700);
+    }
+    function remoteDesktopPassword(result) {
+      if (result?.ok !== true) throw new Error(loginDetail(result?.error || result?.reason, typeof result?.password === 'string' ? result.password : '') || tr('desktopCopyFailed'));
+      if (typeof result.password !== 'string' || !result.password || result.password.length > 4096 || /[\r\n\0]/.test(result.password)) throw new Error(tr('desktopCopyInvalid'));
+      return result.password;
+    }
+    // Deliberately synchronous: after fetch, execCommand can still work on HTTP.
+    // A fresh trusted retry click also runs this before any promise/await.
+    function legacyCopyPassword(value) {
+      const previous = document.activeElement;
+      const field = document.createElement('textarea');
+      field.value = value;
+      field.readOnly = true;
+      field.tabIndex = -1;
+      field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none';
+      try {
+        document.body.appendChild(field);
+        field.focus({ preventScroll: true });
+        field.select();
+        field.setSelectionRange(0, field.value.length);
+        return document.execCommand('copy') === true;
+      } finally {
+        field.value = '';
+        field.remove();
+        try { previous?.focus({ preventScroll: true }); } catch { /* Focus restoration is best-effort. */ }
+      }
+    }
+    async function copyDesktopPassword(value, legacyCopy, secureCopy, isCurrent, timeoutMs = 2000) {
+      let failure = '';
+      if (!isCurrent()) return { ok: false, error: tr('desktopCopyExpired') };
+      try { if (legacyCopy(value) === true) return { ok: true }; failure = tr('desktopCopyDenied'); }
+      catch (error) { failure = loginDetail(error.message || error, value); }
+      if (!secureCopy) return { ok: false, error: failure + '; ' + tr('desktopCopyUnavailable') };
+      let timer;
+      const redaction = { value };
+      try {
+        // Invoke writeText synchronously too, preserving activation on the retry.
+        const pending = secureCopy(value);
+        value = '';
+        const outcome = await Promise.race([
+          Promise.resolve(pending).then(() => ({ ok: true }), error => ({ ok: false, error: redaction.value ? loginDetail(error.message || error, redaction.value) : tr('desktopCopyExpired') })),
+          new Promise(resolve => { timer = setTimeout(() => resolve({ ok: false, error: tr('desktopCopyTimeout') }), timeoutMs); }),
+        ]);
+        return isCurrent() ? outcome : { ok: false, error: tr('desktopCopyExpired') };
+      } catch (error) { return { ok: false, error: loginDetail(error.message || error, redaction.value) || failure }; }
+      finally { value = ''; redaction.value = ''; clearTimeout(timer); }
+    }
+
+    // User-only credential action. No effect fetches it, and no model tool sees it.
+    function DesktopPasswordCopy() {
+      const [busy, setBusy] = React.useState(false);
+      const [fallback, setFallback] = React.useState(false);
+      const [message, setMessage] = React.useState('');
+      const [copied, setCopied] = React.useState(false);
+      const secret = React.useRef(null);
+      const input = React.useRef(null);
+      const mounted = React.useRef(false);
+      const life = React.useRef(0);
+      const lock = React.useRef(null);
+      const expiry = React.useRef(null);
+      const clearSecret = () => {
+        if (secret.current) secret.current.value = '';
+        secret.current = null;
+        if (input.current) { input.current.value = ''; input.current.type = 'password'; }
+        clearTimeout(expiry.current); expiry.current = null;
+      };
+      React.useEffect(() => {
+        mounted.current = true; life.current += 1;
+        return () => { mounted.current = false; life.current += 1; lock.current = null; clearSecret(); };
+      }, []);
+      const run = async (retry = false) => {
+        if (!mounted.current || lock.current) return;
+        const ticket = {}, epoch = life.current;
+        const current = () => mounted.current && life.current === epoch && lock.current === ticket;
+        lock.current = ticket; setBusy(true); setMessage(''); setCopied(false);
+        try {
+          if (!retry) {
+            clearSecret(); setFallback(false);
+            const result = await post('/login/original/password', {});
+            if (!current()) return;
+            const value = remoteDesktopPassword(result);
+            result.password = '';
+            secret.current = { value, expiresAt: Date.now() + 30000 };
+            expiry.current = setTimeout(() => {
+              clearSecret();
+              if (mounted.current && life.current === epoch) { setFallback(false); setCopied(false); setMessage(tr('desktopCopyExpired')); }
+            }, 30000);
+          }
+          const held = secret.current;
+          if (!held?.value || held.expiresAt <= Date.now()) { clearSecret(); setFallback(false); setMessage(tr('desktopCopyExpired')); return; }
+          const secureCopy = window.isSecureContext && typeof navigator.clipboard?.writeText === 'function'
+            ? value => navigator.clipboard.writeText(value) : null;
+          const result = await copyDesktopPassword(held.value, legacyCopyPassword, secureCopy,
+            () => current() && secret.current === held && held.expiresAt > Date.now());
+          if (!current() || secret.current !== held) return;
+          if (result.ok) {
+            clearSecret(); setFallback(false); setCopied(true); setMessage(tr('desktopCopied'));
+          } else {
+            setFallback(true); setMessage(tr('desktopCopyFallback') + ' ' + loginDetail(result.error, held.value));
+          }
+        } catch (error) {
+          if (current()) { const reason = loginDetail(error.message || error, secret.current?.value); clearSecret(); setFallback(false); setMessage(tr('desktopCopyFailed') + ': ' + reason); }
+        } finally {
+          if (lock.current === ticket) lock.current = null;
+          if (mounted.current && life.current === epoch) setBusy(false);
+        }
+      };
+      const reveal = () => {
+        if (!secret.current?.value || secret.current.expiresAt <= Date.now()) { clearSecret(); setFallback(false); setMessage(tr('desktopCopyExpired')); return; }
+        if (input.current) { input.current.type = 'text'; input.current.focus(); input.current.select(); }
+      };
+      return h('div', { style: { marginTop: 8 }, 'aria-busy': busy },
+        h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: () => run(false) }, tr(busy ? 'desktopCopying' : 'desktopCopy')),
+        h('p', { style: S.dim }, tr('desktopCopyNote')),
+        message ? h('p', { role: copied ? 'status' : 'alert', style: { ...S.dim, color: copied ? T.success : T.warn, overflowWrap: 'anywhere' } }, message) : null,
+        fallback && secret.current ? h('div', { style: { ...行, marginTop: 6 } },
+          h('input', { ref: input, type: 'password', readOnly: true, value: secret.current.value, autoComplete: 'off', spellCheck: false,
+            'aria-label': tr('desktopCopyField'), style: { ...输入框, width: 220, maxWidth: '100%' } }),
+          h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: () => run(true) }, tr('desktopCopyRetry')),
+          h('button', { type: 'button', style: S.btn(false), disabled: busy, onClick: reveal }, tr('desktopCopyReveal'))) : null);
+    }
+
     // Only this exact relative URL is accepted; the public mount is resolved above.
     function desktopViewPath(result, mount, now = Date.now()) {
       const expires = typeof result?.expiresAt === 'number' ? result.expiresAt : Date.parse(result?.expiresAt);
@@ -785,7 +925,7 @@ window.__ModuleLoader__.load({
       const life = React.useRef(0);
       const statusLock = React.useRef(null);
       const openLock = React.useRef(null);
-      const detail = (value) => String(value || '').replace(/data:image\/[^\s]+/gi, '[private image]').slice(0, 700);
+      const detail = loginDetail;
       const readStatus = async (epoch = life.current) => {
         if (!mounted.current || life.current !== epoch || statusLock.current) return;
         const ticket = {};
@@ -848,6 +988,7 @@ window.__ModuleLoader__.load({
         status?.reason ? h('p', { style: { ...S.dim, overflowWrap: 'anywhere' } }, status.reason) : null,
         statusError ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, statusError) : null,
         h('button', { type: 'button', style: S.btn(true), disabled: opening, onClick: open }, tr(opening ? 'desktopOpening' : 'desktopOpen')),
+        h(DesktopPasswordCopy),
         openError ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, openError) : null,
         h('p', { style: S.dim }, tr('desktopPrivate')),
         window.location.protocol === 'http:' ? h('p', { role: 'note', style: { ...S.dim, color: T.warn } }, tr('desktopHttpWarning')) : null,

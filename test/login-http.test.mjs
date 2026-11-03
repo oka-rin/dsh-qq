@@ -74,7 +74,7 @@ const post = (body = {}, headers = {}) => ({ method: 'POST', body, headers });
 
 test('every HTTP route and upgrade authenticates; absent/failing Connection fails closed', async t => {
   const f = await fixture(t);
-  for (const [path, method] of [['/status', 'GET'], ['/desktop/session', 'POST'], ['/desktop/close', 'POST'], ['/desktop/view', 'GET'], ['/desktop/info', 'GET'], ['/desktop/viewer.js', 'GET']]) {
+  for (const [path, method] of [['/status', 'GET'], ['/original', 'GET'], ['/original/password', 'POST'], ['/desktop/session', 'POST'], ['/desktop/close', 'POST'], ['/desktop/view', 'GET'], ['/desktop/info', 'GET'], ['/desktop/viewer.js', 'GET']]) {
     const r = await f.request(path, { method, ...(method === 'POST' ? { body: {} } : {}), auth: false }); assert.equal(r.status, 401); assert.equal(r.headers['cache-control'], 'no-store');
   }
   assert.match(await f.upgrade(), /^HTTP\/1.1 403/);
@@ -236,6 +236,76 @@ test('Docker original entry keeps DSH auth, never starts substitute desktop or e
   assert.equal(hop.headers['cache-control'], 'no-store'); assert.doesNotMatch(hop.headers.location, /password|token/);
   assert.equal((await f.request('/original?url=http://evil.test')).status, 400);
   f.dispose(); assert.equal(disposed, 1);
+});
+
+test('browser-only password POST authenticates, checks mutations, bounds JSON and projects only verified credential', async t => {
+  let passwords = 0;
+  const f = await fixture(t, { originalLogin: { password: async ({ signal }) => { assert.equal(signal.aborted, false); passwords++; return { ok: true, password: 'testpass', env: ['OTHER=synthetic-private'], path: '/root/private' }; } } });
+  for (const [options, expected] of [
+    [{ ...post(), auth: false }, 401], [{ method: 'GET' }, 400], [{ method: 'PUT', body: '{}' }, 400],
+    [post({}, { origin: '' }), 400], [post({}, { origin: 'http://evil.test' }), 403],
+    [post({}, { 'sec-fetch-site': 'cross-site' }), 400], [post({}, { 'content-type': 'text/plain' }), 400],
+    [post({}, { host: 'wrong.test' }), 403], [post('true'), 400], [post('[]'), 400], [post('null'), 400],
+    [post('{invalid'), 400], [post({ password: 'replacement' }), 400], [post(' '.repeat(4097)), 400],
+  ]) { const denied = await f.request('/original/password', options); assert.equal(denied.status, expected); assert.equal(denied.headers['cache-control'], 'no-store'); assert.doesNotMatch(denied.text, /testpass|synthetic-private|root\/private/); }
+  assert.equal(passwords, 0);
+  assert.equal((await f.request('/original/password?token=x', post())).status, 400); assert.equal(passwords, 0);
+  const result = await f.request('/original/password', { ...post(), prefix: '/dsh' });
+  assert.equal(result.status, 200); assert.deepEqual(result.json, { ok: true, password: 'testpass' });
+  assert.equal(result.headers['cache-control'], 'no-store'); assert.equal(result.headers['referrer-policy'], 'no-referrer');
+  assert.equal(result.headers.location, undefined); assert.equal(result.headers['set-cookie'], undefined);
+  assert.doesNotMatch(result.text, /synthetic-private|root\/private/); assert.equal(passwords, 1);
+});
+
+test('password only appears in explicit credential response, never discovery status session redirect or GET', async t => {
+  let reads = 0;
+  const f = await fixture(t, { originalLogin: {
+    target: async () => ({ port: 6081, path: '/vnc.html?autoconnect=1&resize=scale' }),
+    redirect: (_req, target) => `http://qq.test:${target.port}${target.path}`,
+    password: async () => { reads++; return { ok: true, password: 'testpass' }; },
+  } });
+  for (const [path, options] of [['/status', {}], ['/desktop/session', post()], ['/original', {}], ['/original/password', {}]]) {
+    const result = await f.request(path, options); assert.doesNotMatch(JSON.stringify(result), /testpass/);
+  }
+  assert.equal(reads, 0);
+  assert.equal((await f.request('/original/password', post())).json.password, 'testpass'); assert.equal(reads, 1);
+});
+
+test('password is unavailable without original Docker backend and Connection fails closed', async t => {
+  const absent = await fixture(t); assert.equal((await absent.request('/original/password', post())).status, 400);
+  for (const options of [{ missingConnection: true }, { throwAuth: true }]) {
+    let reads = 0;
+    const f = await fixture(t, { ...options, originalLogin: { password: async () => { reads++; return { ok: true, password: 'testpass' }; } } });
+    assert.equal((await f.request('/original/password', post())).status, 403); assert.equal(reads, 0);
+  }
+});
+
+test('password backend rejection and malformed result cannot leak raw secrets or paths', async t => {
+  for (const password of [async () => { throw new Error('testpass QQ_PASSWORD=synthetic-private /root/private'); }, async () => ({ ok: false, password: 'testpass', error: 'synthetic-private' }), async () => ({ ok: true, password: 'too-long-secret' }), async () => ({ ok: true, password: 'bad\npass' })]) {
+    const f = await fixture(t, { originalLogin: { password } }); const result = await f.request('/original/password', post());
+    assert.equal(result.status, 400); assert.match(result.json.error, /无法安全读取并核实/);
+    assert.doesNotMatch(result.text, /testpass|synthetic-private|root\/private|too-long|bad/);
+  }
+});
+
+test('credential reads have a six-per-minute cap in addition to global concurrency bound', async t => {
+  let reads = 0;
+  const f = await fixture(t, { originalLogin: { password: async () => { reads++; return { ok: true, password: 'testpass' }; } } });
+  for (let i = 0; i < 6; i++) assert.equal((await f.request('/original/password', post())).status, 200);
+  const denied = await f.request('/original/password', post()); assert.equal(denied.status, 429);
+  assert.equal(denied.headers['cache-control'], 'no-store'); assert.equal(reads, 6); assert.doesNotMatch(denied.text, /testpass/);
+});
+
+test('credential route disposal and disconnect abort in-flight backend read without leaking late rejection', async t => {
+  const entered = deferred(), stopped = deferred(); let signal, reject;
+  const f = await fixture(t, { originalLogin: { password: async options => { signal = options.signal; signal.addEventListener('abort', () => stopped.resolve(), { once: true }); entered.resolve(); return new Promise((_resolve, fail) => { reject = fail; }); } } });
+  const request = f.request('/original/password', post()); await entered.promise; f.api.dispose();
+  const response = await request; assert.equal(response.status, 400); assert.equal(signal.aborted, true); assert.doesNotMatch(response.text, /testpass/);
+  reject(new Error('late testpass')); await new Promise(resolve => setImmediate(resolve));
+  const qEntered = deferred(), qStopped = deferred(); let qReject;
+  const q = await fixture(t, { originalLogin: { password: async ({ signal }) => { signal.addEventListener('abort', () => qStopped.resolve(), { once: true }); qEntered.resolve(); return new Promise((_resolve, fail) => { qReject = fail; }); } } });
+  const req = http.request(q.origin + root + '/original/password', { method: 'POST', headers: { 'x-auth': 'yes', origin: q.origin, 'content-type': 'application/json' } });
+  req.on('error', () => {}); req.end('{}'); await qEntered.promise; req.destroy(); await qStopped.promise; qReject(new Error('late testpass'));
 });
 
 test('failed original service does not silently fall back to a substitute', async t => {

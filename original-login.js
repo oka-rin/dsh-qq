@@ -1,10 +1,96 @@
 import { isIP } from 'node:net';
+import { spawn } from 'node:child_process';
+import { createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { command } from './runtime.js';
 
 const ORIGINAL_PATH = '/vnc.html?autoconnect=1&resize=scale';
 const MAX_PAGE_BYTES = 256 * 1024;
 const unavailable = () => new Error('原版 SnowLuma noVNC 尚未就绪；请检查所选容器已有的 6081/tcp 发布和原版 VNC 密码配置');
 const cancelled = () => new Error('原版 SnowLuma 登录检查已取消');
+const passwordUnavailable = () => new Error('无法安全读取并核实原版 VNC 密码；请检查所选容器的 VNC 密码配置');
+const MAX_ENV_BYTES = 64 * 1024;
+
+// Credential commands deliberately do not use runtime.command: it combines
+// stderr with stdout and includes that content in errors. Never log either pipe.
+function credentialCommand(bin, args, { signal, timeoutMs, maxOutputBytes }) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(cancelled()); return; }
+    let child;
+    try { child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false }); }
+    catch { reject(passwordUnavailable()); return; }
+    const chunks = [];
+    let size = 0, stderrSize = 0, settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort);
+      if (error) { child.kill('SIGKILL'); for (const chunk of chunks) chunk.fill(0); reject(passwordUnavailable()); }
+      else { const output = Buffer.concat(chunks, size); for (const chunk of chunks) chunk.fill(0); resolve(output); }
+    };
+    const abort = () => finish(passwordUnavailable());
+    const timer = setTimeout(abort, timeoutMs); timer.unref?.();
+    signal.addEventListener('abort', abort, { once: true });
+    child.stdout.on('data', chunk => {
+      if (settled) { chunk.fill(0); return; }
+      size += chunk.length;
+      if (size > maxOutputBytes) { chunk.fill(0); finish(passwordUnavailable()); }
+      else chunks.push(chunk);
+    });
+    child.stderr.on('data', chunk => { stderrSize += chunk.length; chunk.fill(0); if (stderrSize > 16384) finish(passwordUnavailable()); });
+    child.stdout.on('error', abort); child.stderr.on('error', abort);
+    child.once('error', abort);
+    child.once('close', code => finish(code === 0 && !signal.aborted ? null : passwordUnavailable()));
+    if (signal.aborted) abort();
+  });
+}
+
+function effectivePassword(output) {
+  if ((typeof output !== 'string' && !Buffer.isBuffer(output)) || Buffer.byteLength(output) > MAX_ENV_BYTES) throw passwordUnavailable();
+  const env = JSON.parse(output.toString());
+  if (!Array.isArray(env) || env.some(value => typeof value !== 'string')) throw passwordUnavailable();
+  const values = env.filter(value => value.startsWith('VNC_PASSWD='));
+  if (values.length > 1) throw passwordUnavailable();
+  if (!values.length || values[0] === 'VNC_PASSWD=') return null;
+  const value = values[0].slice('VNC_PASSWD='.length);
+  // Original VNC authentication uses at most eight bytes. Restrict to printable
+  // ASCII so a browser's encoding cannot change their meaning; never invent a default.
+  if (!/^[\x20-\x7e]{1,4096}$/.test(value)) throw passwordUnavailable();
+  return value.slice(0, 8);
+}
+
+function vncKey() {
+  // Classic VNC password-file obfuscation uses this public fixed DES key.
+  // Triple-DES with the same key three times is single DES, available without
+  // enabling OpenSSL's legacy cipher provider. VNC reverses every key byte.
+  const key = Buffer.from([23, 82, 107, 6, 35, 78, 88, 7]).map(value => {
+    let reversed = 0;
+    for (let bit = 0; bit < 8; bit++) { reversed = (reversed << 1) | (value & 1); value >>>= 1; }
+    return reversed;
+  });
+  return Buffer.concat([key, key, key]);
+}
+
+function passwordFromFile(output) {
+  if (!Buffer.isBuffer(output) || output.length !== 8) throw passwordUnavailable();
+  const decipher = createDecipheriv('des-ede3-ecb', vncKey(), null);
+  decipher.setAutoPadding(false);
+  let plain;
+  try {
+    plain = Buffer.concat([decipher.update(output), decipher.final()]);
+    const zero = plain.indexOf(0), end = zero < 0 ? 8 : zero;
+    if (!end || !plain.subarray(0, end).every(value => value >= 32 && value <= 126) || !plain.subarray(end).every(value => value === 0)) throw passwordUnavailable();
+    return plain.subarray(0, end).toString('ascii');
+  } finally { plain?.fill(0); }
+}
+
+function passwordMatches(password, output) {
+  if (!Buffer.isBuffer(output) || output.length !== 8) return false;
+  const plain = Buffer.alloc(8); plain.write(password, 'ascii');
+  const cipher = createCipheriv('des-ede3-ecb', vncKey(), null);
+  cipher.setAutoPadding(false);
+  let expected;
+  try { expected = Buffer.concat([cipher.update(plain), cipher.final()]); return timingSafeEqual(expected, output); }
+  finally { plain.fill(0); expected?.fill(0); }
+}
 const portNumber = value => /^[0-9]{1,5}$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? Number(value) : null;
 
 // Race even injected implementations that do not observe AbortSignal; consume late rejection.
@@ -69,10 +155,13 @@ async function probe(fetcher, port, signal) {
 
 /**
  * Discover only the ORIGINAL, already-published Docker noVNC service. This does not
- * start a service, publish ports, read passwords, or replace its separate VNC
- * password authentication. The caller must authenticate/authorize the redirect.
+ * start a service, publish ports, or replace its separate VNC authentication.
+ * password() is a separate user-only credential operation; never call it from
+ * status, discovery, redirect construction, logs, or a model tool.
  */
-export function createOriginalLogin({ mode, container, run = command, fetcher = fetch }) {
+export function createOriginalLogin({ mode, container, run, fetcher = fetch }) {
+  const targetRun = run || command;
+  const passwordRun = run || credentialCommand;
   if (mode === 'docker' && (typeof container !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(container))) throw new Error('原版登录的容器名无效');
   const lifetime = new AbortController();
   async function target({ signal } = {}) {
@@ -84,7 +173,7 @@ export function createOriginalLogin({ mode, container, run = command, fetcher = 
       const commandTimeout = new AbortController();
       timer = setTimeout(() => commandTimeout.abort(), 8000);
       const commandSignal = AbortSignal.any([active, commandTimeout.signal]);
-      const output = await until(Promise.resolve().then(() => run('docker', ['port', container, '6081/tcp'], { timeoutMs: 8000, signal: commandSignal })), commandSignal);
+      const output = await until(Promise.resolve().then(() => targetRun('docker', ['port', container, '6081/tcp'], { timeoutMs: 8000, signal: commandSignal })), commandSignal);
       clearTimeout(timer);
       const port = publishedPort(output);
       const probeTimeout = new AbortController();
@@ -98,7 +187,43 @@ export function createOriginalLogin({ mode, container, run = command, fetcher = 
       throw unavailable();
     } finally { clearTimeout(timer); }
   }
-  return { target, dispose() { lifetime.abort(); } };
+  async function password({ signal } = {}) {
+    const active = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
+    if (active.aborted) throw cancelled();
+    if (mode !== 'docker') throw passwordUnavailable();
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), 8000);
+    const commandSignal = AbortSignal.any([active, timeout.signal]);
+    let environment, stored;
+    try {
+      environment = await until(Promise.resolve().then(() => passwordRun('docker',
+        ['inspect', '--format', '{{json .Config.Env}}', container],
+        { timeoutMs: 8000, maxOutputBytes: MAX_ENV_BYTES, signal: commandSignal })), commandSignal);
+      const configured = effectivePassword(environment);
+      if (Buffer.isBuffer(environment)) environment.fill(0);
+      environment = null;
+      if (commandSignal.aborted) throw cancelled();
+      // Fixed path and bounded binary output only; no shell, host path, arbitrary
+      // file reader, environment dump, or remote service configuration is exposed.
+      stored = await until(Promise.resolve().then(() => passwordRun('docker',
+        ['exec', container, 'head', '-c', '8', '/root/.vnc/passwd'],
+        { timeoutMs: 8000, maxOutputBytes: 8, signal: commandSignal })), commandSignal);
+      if (commandSignal.aborted) throw cancelled();
+      // Some original images generate the effective password file when the env
+      // is unset/empty. Read that actual fixed source, never derive a default.
+      const value = configured ?? passwordFromFile(stored);
+      if (!passwordMatches(value, stored)) throw passwordUnavailable();
+      return { ok: true, password: value };
+    } catch {
+      if (active.aborted) throw cancelled();
+      throw passwordUnavailable();
+    } finally {
+      clearTimeout(timer);
+      if (Buffer.isBuffer(environment)) environment.fill(0);
+      if (Buffer.isBuffer(stored)) stored.fill(0);
+    }
+  }
+  return { target, password, dispose() { lifetime.abort(); } };
 }
 
 /** Pure redirect construction; the parent must call trusted Connection first. */

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
+import { createCipheriv } from 'node:crypto';
 import { createOriginalLogin, originalRedirect } from '../original-login.js';
 
 const path = '/vnc.html?autoconnect=1&resize=scale';
@@ -153,6 +154,94 @@ test('8s command deadline bounds an injected runner that ignores cancellation', 
   await assert.rejects(result, /noVNC 尚未就绪/);
   assert.equal(commandSignal.aborted, true);
   assert.equal(f.requests.length, 0);
+});
+
+// Synthetic fixtures only: never inspect a live container's credential in tests.
+function vncFile(value) {
+  const key = Buffer.from([232, 74, 214, 96, 196, 114, 26, 224]);
+  const input = Buffer.alloc(8); input.write(value.slice(0, 8), 'ascii');
+  const cipher = createCipheriv('des-ede3-ecb', Buffer.concat([key, key, key]), null); cipher.setAutoPadding(false);
+  return Buffer.concat([cipher.update(input), cipher.final()]);
+}
+function passwordFixture({ env = ['OTHER_SYNTHETIC=hidden', 'VNC_PASSWD=testpass'], file = vncFile('testpass'), run, ...options } = {}) {
+  const calls = [];
+  const f = fixture({ run: run || (async (bin, args, opts) => { calls.push([bin, args, opts]); return args[0] === 'inspect' ? JSON.stringify(env) : Buffer.from(file); }), ...options });
+  return { ...f, calls };
+}
+test('explicit password operation verifies original fixed password file with VNC DES key bit ordering', async () => {
+  // Independently confirmed by x11vnc -storepasswd testpass on a temporary file.
+  assert.equal(vncFile('testpass').toString('hex'), '87803c720bbb91d5');
+  const f = passwordFixture();
+  assert.deepEqual(await f.login.password(), { ok: true, password: 'testpass' });
+  assert.equal(f.calls.length, 2);
+  assert.deepEqual(f.calls[0][1], ['inspect', '--format', '{{json .Config.Env}}', 'SnowLuma_1.test-2']);
+  assert.deepEqual(f.calls[1][1], ['exec', 'SnowLuma_1.test-2', 'head', '-c', '8', '/root/.vnc/passwd']);
+  assert.deepEqual(f.calls.map(call => call[2].maxOutputBytes), [65536, 8]);
+  assert.ok(f.calls.every(call => call[0] === 'docker' && call[2].timeoutMs === 8000 && call[2].signal instanceof AbortSignal));
+  assert.deepEqual(f.requests, []);
+});
+for (const value of ['a', 'abc def', '12345678', '12345678ignored-suffix']) test(`returns verified effective first eight bytes for synthetic password length ${value.length}`, async () => {
+  const f = passwordFixture({ env: [`VNC_PASSWD=${value}`], file: vncFile(value) });
+  assert.deepEqual(await f.login.password(), { ok: true, password: value.slice(0, 8) });
+});
+for (const env of [['VNC_PASSWD=testpass', 'VNC_PASSWD=testpass'], ['VNC_PASSWD=密码'], ['VNC_PASSWD=test\npass'], ['VNC_PASSWD=test\u0000pass'], ['VNC_PASSWD=' + 'a'.repeat(4097)], [null], null, {}]) test('ambiguous/unsupported VNC source fails closed without default', async () => {
+  const f = passwordFixture({ env });
+  await assert.rejects(f.login.password(), /无法安全读取并核实/);
+  assert.equal(f.calls.length, 1);
+});
+for (const env of [[], ['VNC_PASSWD='], ['VNC_PASSWORD=not-the-vnc-source']]) test('unset/empty env uses authoritative actual fixed VNC file, never a guessed default', async () => {
+  const f = passwordFixture({ env }); assert.deepEqual(await f.login.password(), { ok: true, password: 'testpass' }); assert.equal(f.calls.length, 2);
+});
+for (const value of ['a', 'abc def', '12345678']) test(`fixed-file fallback validates printable ASCII and zero-padding for length ${value.length}`, async () => {
+  const f = passwordFixture({ env: [], file: vncFile(value) }); assert.deepEqual(await f.login.password(), { ok: true, password: value });
+});
+for (const value of ['', 'bad\u0000pad', 'bad\npass', '\u007f']) test('fixed-file fallback rejects empty, control, non-ASCII or malformed padding', async () => {
+  const f = passwordFixture({ env: [], file: vncFile(value) }); await assert.rejects(f.login.password(), /无法安全读取并核实/);
+});
+for (const file of [Buffer.alloc(8), Buffer.alloc(7), Buffer.alloc(9), '87803c720bbb91d5']) test('unset env and corrupt fixed-file source fail closed without default', async () => {
+  const f = passwordFixture({ run: async (_bin, args) => args[0] === 'inspect' ? '[]' : file }); await assert.rejects(f.login.password(), /无法安全读取并核实/);
+});
+for (const file of [Buffer.alloc(8), Buffer.alloc(7), Buffer.alloc(9), vncFile('changed'), '87803c720bbb91d5']) test('mismatched or invalid original password file never discloses env credential', async () => {
+  const f = passwordFixture({ run: async (_bin, args) => args[0] === 'inspect' ? '["VNC_PASSWD=testpass"]' : file });
+  await assert.rejects(f.login.password(), error => /无法安全读取并核实/.test(error.message) && !error.message.includes('testpass'));
+});
+for (const output of ['not JSON synthetic-secret', JSON.stringify(['VNC_PASSWD=testpass', 'OTHER=' + 'x'.repeat(65536)]), Buffer.alloc(65537)]) test('malformed/oversized environment output is sanitized', async () => {
+  const f = passwordFixture({ run: async () => output });
+  await assert.rejects(f.login.password(), error => /无法安全读取并核实/.test(error.message) && !error.message.includes('synthetic-secret'));
+});
+test('both credential commands sanitize injected rejection including stdout, host path and other credentials', async () => {
+  for (const failAt of ['inspect', 'exec']) {
+    const f = passwordFixture({ run: async (_bin, args) => { if (args[0] === failAt) throw new Error('testpass QQ_PASSWORD=synthetic-secret /root/private'); return '["VNC_PASSWD=testpass"]'; } });
+    await assert.rejects(f.login.password(), error => /无法安全读取并核实/.test(error.message) && !/testpass|synthetic-secret|private/.test(error.message));
+  }
+});
+for (const mode of ['native', 'external', undefined]) test(`password unavailable in ${mode} mode without reading any source`, async () => {
+  const f = passwordFixture({ mode }); await assert.rejects(f.login.password(), /无法安全读取并核实/); assert.equal(f.calls.length, 0);
+});
+test('cancelled/disposed credential reads do not run, wait for or reveal late backend failures', async () => {
+  let reject, commandSignal;
+  const f = passwordFixture({ run: (_bin, _args, opts) => { commandSignal = opts.signal; return new Promise((_resolve, fail) => { reject = fail; }); } });
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(f.login.password({ signal: controller.signal }), /已取消/);
+  assert.equal(commandSignal, undefined);
+  const result = f.login.password(); await setImmediate(); f.login.dispose();
+  await assert.rejects(result, /已取消/); assert.equal(commandSignal.aborted, true);
+  reject(new Error('late synthetic-secret')); await setImmediate();
+  await assert.rejects(f.login.password(), /已取消/);
+});
+test('credential deadline includes both reads and handles an injected runner ignoring abort', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] }); let signal;
+  const f = passwordFixture({ run: async (_bin, args, options) => { signal = options.signal; if (args[0] === 'inspect') return '["VNC_PASSWD=testpass"]'; return new Promise(() => {}); } });
+  const result = f.login.password(); await setImmediate(); t.mock.timers.tick(8000);
+  await assert.rejects(result, /无法安全读取并核实/); assert.equal(signal.aborted, true);
+});
+test('credential source buffers are cleared after success and parse failure', async () => {
+  const environment = Buffer.from('["VNC_PASSWD=testpass"]'), file = vncFile('testpass');
+  const f = passwordFixture({ run: async (_bin, args) => args[0] === 'inspect' ? environment : file });
+  assert.equal((await f.login.password()).ok, true); assert.ok(environment.every(b => b === 0)); assert.ok(file.every(b => b === 0));
+  const bad = Buffer.from('malformed private-secret');
+  const broken = passwordFixture({ run: async () => bad });
+  await assert.rejects(broken.login.password(), /无法安全读取并核实/); assert.ok(bad.every(b => b === 0));
 });
 
 const req = (host, encrypted = false, extra = {}) => ({ headers: { host, ...extra }, socket: { encrypted } });

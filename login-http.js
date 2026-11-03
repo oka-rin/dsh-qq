@@ -54,6 +54,7 @@ function body(req, signal) {
 /** Browser-only credential surfaces; never register these operations as model tools. */
 export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogin = null }) {
   let session = null, busy = false, disposed = false;
+  let passwordWindowAt = Date.now(), passwordRequests = 0;
   const requests = new Set();
   const send = (res, status, value, extra = {}) => {
     if (res.destroyed || res.writableEnded) return;
@@ -103,12 +104,34 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
 
   // Docker deployments already provide the original SnowLuma noVNC desktop.
   // Only advertise this fixed authenticated hop; never accept a redirect URL
-  // from the browser, and never read or forward the original VNC password.
+  // from the browser. Credential retrieval is a separate explicit POST below.
   exact('/original', async (req, res, signal) => {
     if (req.method !== 'GET' || !originalLogin) throw new Error('原版 SnowLuma 网页桌面未配置');
     const target = await until(originalLogin.target({ signal }), signal);
     const location = originalLogin.redirect(req, target);
     res.writeHead(302, { ...HEADERS, location }); res.end();
+  });
+
+  exact('/original/password', async (req, res, signal) => {
+    mutation(req);
+    const input = await body(req, signal);
+    if (Object.keys(input).length) throw new Error('密码请求不接受参数');
+    if (signal.aborted) throw cancelled();
+    if (!originalLogin?.password) throw new Error('原版 SnowLuma 网页桌面未配置');
+    if (Date.now() - passwordWindowAt >= 60_000) { passwordWindowAt = Date.now(); passwordRequests = 0; }
+    if (passwordRequests >= 6) { send(res, 429, { ok: false, error: '密码读取过于频繁，请稍后重试' }); return; }
+    passwordRequests++;
+    try {
+      const value = await until(Promise.resolve().then(() => originalLogin.password({ signal })), signal);
+      if (signal.aborted || disposed || res.destroyed) throw cancelled();
+      // Project exactly the one intended credential, never backend metadata.
+      if (value?.ok !== true || typeof value.password !== 'string' || !/^[\x20-\x7e]{1,8}$/.test(value.password)) throw new Error();
+      send(res, 200, { ok: true, password: value.password });
+    } catch {
+      // Even an injected backend may reject with raw stdout/stderr containing
+      // passwords, other environment variables, QQ credentials, or host paths.
+      throw new Error('无法安全读取并核实原版 VNC 密码；请检查所选容器的 VNC 密码配置');
+    }
   });
 
   exact('/desktop/session', async (req, res, signal) => {
