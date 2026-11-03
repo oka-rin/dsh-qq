@@ -8,16 +8,17 @@
 
 本项目源码及随包原创图标采用 [MIT License](../LICENSE)。源码提供方已于 2026-11-03 确认有权发布并选择 MIT。SnowLuma 后端、QQ 客户端、容器镜像、模型服务、媒体素材及其他外部服务不包含在此授权内，仍须遵守各自许可与使用条款。项目仓库：https://github.com/oka-rin/dsh-qq；问题反馈：https://github.com/oka-rin/dsh-qq/issues。
 
-## 0.2.2 接入安全补丁
+## 0.3.0 原生安装入口
 
-- 显式禁用环境变量密钥时，向导状态和模型列表检测均不再回退读取旧接口密钥。
-- 回归验证：空数据目录、未运行 OneBot 后端时，首次配置向导仍可独立打开，且不会触发安装或部署。
+- 新增[原生安装脚本与迁移指南](./native.md)：默认只读预览，显式确认后准备官方原版 SnowLuma v2.4.0 完整包、用户提供的 QQ 和 systemd 服务。
+- 安装和首次配置仍分离；不会隐式安装、启动服务、接受上游条款、扫码登录或停止现有 Docker 实例。
+- 保留 0.2.2 的接入安全修复：显式禁用环境变量密钥后，向导状态和模型列表检测不回退读取旧接口密钥。
 
 ## 能力与边界
 
 - 通过 OneBot HTTP 动作和正向 WebSocket 事件流接入 QQ，支持群聊、私聊、自动回复、主动行为、分享、每日资讯、QQ 空间、成员/群管理、文件、相册、合并转发、聊天归档和人物学习。
 - 设置中的「QQ 机器人」面板用于查看状态、会话、决策、日志，发送消息及修改配置；机器人控制台提供约 200 个配置字段。
-- 图片理解需要视觉模型；动图/视频抽帧需要 `ffmpeg` 和 `ffprobe`。缺失时相关能力降级，不会自动安装系统软件。
+- 图片理解需要视觉模型；动图/视频抽帧需要 `ffmpeg` 和 `ffprobe`。运行时缺失会降级，不会隐式安装系统软件；独立原生安装器在显式 `--install-deps` 授权下可准备这些依赖。
 - 生图、嵌入检索、联网/媒体来源、表情图库服务等需要各自可用的外部端点、权限或素材；本包不含这些服务或私人图库。
 - 非标准动作（尤其 QQ 空间、群相册和社交扩展）依赖后端实现和账号权限；不能保证任意 OneBot v11 后端提供全部动作。通过 `qq_action_list` 查看动作分类，必要时使用 `qq_raw_action`。
 
@@ -29,9 +30,9 @@
 2. 支持 Cordis Host/Client bundle、原生 tools 和 Web 设置面板的 DeepSeek Harness。主插件依赖 `@deepseek-ai/dsh-tools`；包管理器负责安装依赖，机器人本体没有第三方 npm 运行依赖。
 3. 你已获准运行的 SnowLuma 或兼容的 OneBot v11 后端、可登录的 QQ 账号、HTTP 和正向 WebSocket 地址及 access token。后端安装、登录、二维码确认和服务条款由你负责。
 4. 用于自动聊天/学习的 OpenAI 兼容模型服务及 API key；按需准备视觉、生图和嵌入服务。
-5. 原生服务管理需要 Linux/systemd 和对目标 unit 的相应权限；不安装或创建 unit。可选：Docker Engine + Compose v2（仅供既有容器兼容模式）；`ffmpeg` / `ffprobe`（动图和视频）。
+5. 原生服务管理需要 Linux/systemd 和对目标 unit 的相应权限；运行期工具不安装或创建 unit。另行运行的[安装脚本](../scripts/install-native.sh)面向 Debian/Ubuntu、x86_64/arm64、systemd，需 root 权限和显式确认。可选：Docker Engine + Compose v2（既有容器兼容）；`ffmpeg` / `ffprobe`（动图和视频）。
 
-**两个 Node 版本要求不要混淆**：本插件机器人使用 Node **>=22.13.0**；[SnowLuma v2.3.4 官方发行包](https://github.com/SnowLuma/SnowLuma/releases/tag/v2.3.4)的完整原生包推荐使用其自带 Node，lite 包另需 **`^24.22.1 || >=26.12.1`**。满足插件引擎版本不代表满足上游 lite 包要求。
+**两个 Node 运行环境不要混淆**：本插件机器人使用 Node **>=22.13.0**；安装脚本只接受 [SnowLuma v2.4.0 官方完整发行包](https://github.com/SnowLuma/SnowLuma/releases/tag/v2.4.0)，使用其自带 Node 和版本检查器，不复用或修改系统 Node。lite 包不在此脚本支持范围；自行部署时应按所选发行包核对上游要求。
 
 ## 安装插件
 
@@ -41,21 +42,21 @@
 
 源码已发布到 GitHub；尚未发布到 npm。
 
-## 首次安装：原生优先，人工安装上游
+## 首次安装：原生优先，安装与登录分离
 
-统一的是 **DSH 插件、机器人与配置入口**，不是绕过上游许可的一键全装程序。首次安装流程是「检查环境 → 人工安装官方原版并扫码 → 连接已有 OneBot → 重启机器人 → 验证」，不以 Docker 为默认前提，也不下载安装或修改 SnowLuma/QQ。
+首次流程是「检查环境 → 预览并审核安装方案 → 显式运行安装脚本或自行部署 → 人工同意条款并扫码 → 连接 OneBot → 重启机器人 → 验证」。不以 Docker 为默认前提；插件安装和向导的「连接」不会隐式运行系统安装器。详细命令、systemd 权限、SSH/VNC 和 Docker 切换见[原生部署指南](./native.md)。
 
 ### 上游条款与支持边界
 
-- 先阅读 [SnowLuma v2.3.4 EULA](https://github.com/SnowLuma/SnowLuma/blob/v2.3.4/EULA.md)，其中 **5.4 要求使用自动化脚本部署前取得事先书面授权**。本项目 MIT 仅覆盖本插件原创代码，不授予 SnowLuma 的下载、再分发、部署自动化或其他权利。
-- 本插件**不提供自动下载器、自动安装脚本、代接受 EULA、主机全局 capability 修改或自动扫码登录**；不会把点击「连接」视为接受上游条款。以后如扩展部署自动化，须先另行落实相应书面授权。
-- [上游固定 v2.3.4 源文件](https://github.com/SnowLuma/SnowLuma/tree/v2.3.4)及[官方发布页](https://github.com/SnowLuma/SnowLuma/releases/tag/v2.3.4)是审核原版来源的入口。原生步骤参考[官方 Linux 手动部署（进阶）文档](https://snowluma.github.io/zh/docs/guide/deploy/linux-manual)；该网页会更新，版本要求以所选发行包为准。**官方 Linux 推荐且仅正式支持 Docker；本文的原生宿主机接入是高级、非官方支持方案**，不能理解为上游承诺支持任意主机或无容器运行。
-- 用户自行审核系统依赖、发行包来源和条款，手工安装、建立所需服务、启动 QQ 并确认二维码；插件不会代为执行这些步骤。已有后端直接连接，不必重装。
+- 审核 [SnowLuma v2.4.0 EULA](https://github.com/SnowLuma/SnowLuma/blob/v2.4.0/EULA.md)、[隐私政策](https://github.com/SnowLuma/SnowLuma/blob/v2.4.0/PRIVACY.md)、QQ 条款及你的实际使用/自动化部署权限；有授权疑问先向上游确认。本项目 MIT 仅覆盖本插件原创代码，不替代任何上游授权。
+- 仓库提供独立的[原生安装脚本](../scripts/install-native.sh)，默认 `--plan`；实际准备需 `--install --confirm-install`、固定版本和用户提供的 QQ 来源。**系统改动确认不等于接受 EULA**；脚本不写自动同意标记、不自动扫码、不自动启动/启用服务，不修改全局 Node capability、sysctl 或 hosts。
+- 使用[固定 v2.4.0 源文件](https://github.com/SnowLuma/SnowLuma/tree/v2.4.0)和[官方完整发行包](https://github.com/SnowLuma/SnowLuma/releases/tag/v2.4.0)，校验官方 GitHub API 的 SHA-256。原生上游背景参考[官方 Linux 手动部署文档](https://snowluma.github.io/zh/docs/guide/deploy/linux-manual)；网页会更新，不能把本项目的宿主机脚本视为上游对任意主机/发行版的支持承诺。
+- 用户负责审核来源、条款、QQ 版本兼容性、人工启动和确认二维码；已有后端可直接连接，不必重装。脚本只准备全新部署，拒绝覆盖已有目标、账号和 unit，不负责升级或复制 Docker 登录态。
 
 ### 首次配置向导
 
 1. 安装插件后打开「QQ 机器人」的首次配置入口，或使用 `qq_setup` 读取配置状态/执行检查。`GET /setup` 返回依赖检查与接入状态（平台、Node、QQ、桌面/扫码环境、媒体工具等）；这是检测线索，不是完整系统依赖验收。`POST /setup/check` 检查拟接入本机后端的 HTTP 登录信息和事件 WS 握手；不执行安装，也不证明全部事件、动作与模型可用。
-2. 如果没有后端，按上述官方入口人工准备 SnowLuma 原版并完成 QQ 登录，在上游启用 OneBot HTTP 和正向 WebSocket；HTTP 动作和 WS 事件必须属于同一个实例。管理页、QR、桌面和任何密码留在受保护的本机环境中。
+2. 如果没有后端，按[原生部署指南](./native.md)准备 SnowLuma 原版并人工完成条款确认、QQ 登录和注入，在上游启用 OneBot HTTP 和正向 WebSocket；HTTP 动作和 WS 事件必须属于同一个实例。管理页、QR、桌面和任何密码留在受保护的本机环境中。
 3. 在向导中填写已有后端的 HTTP / WS 地址和认证 token，按需填写模型端点/key。`POST /setup/check` 和 `POST /setup/connect` 的 **OneBot 地址只接受本地 loopback HTTP(S) / WS(S) 接入**；不是任意远程 URL 代理。地址不能带凭据/查询参数，WS 可用根路径或 `/event`；HTTP/WS 应填写同一本机主机名。OneBot 在远端时先由用户建立受保护的本机转发，或由熟悉配置的管理员在现有配置流程中管理外部服务。模型端点另按 HTTPS（本机可 HTTP）规则校验，不受 OneBot 本机地址限制。
 4. 确认连接后保存配置。状态与检查结果中的 token/key 会脱敏，不能据此找回原值。已有配置会先备份，备份文件权限为 **0600**；备份仍含原始密钥，应同数据目录一起保护，不要随发布包分享。
    更换模型接口 Base URL 时必须显式提交新 `apiKey`，不会继承旧接口的内联或环境变量密钥；工具可显式提交空字符串表示无密钥，并清除环境变量回退。同一接口留空不提交则保留原密钥。
@@ -63,7 +64,7 @@
 
 `qq_gateway` 用于显式查询或管理已配置后端；默认 `native` 模式调用用户预先建立的 systemd unit（`snowluma.target`，system scope）。启动/停止/重启必须是明确操作，不会安装服务、下载软件或创建 QQ 登录态。权限不足请由管理员配置最小必要权限；不要因为向导报错授予整个 DSH 不受限制的 root/sudo 权限。`external` 模式只连接由其他管理器运行的后端；Docker 仅作为显式选择的兼容模式，见下文。
 
-**实现/验证范围**：本版本提供原生优先的配置、检测与既有服务管理入口；不表示任何主机已完成原生安装、真实 QQ 登录或从 Docker 迁移。升级与检查不会停止、迁移或重建现有容器及登录数据。
+**实现/验证范围**：本版本提供原生安装准备脚本、配置、检测与服务管理入口；安装脚本结束不表示真实 QQ 登录或 Docker 迁移完成。未完成人工扫码及端到端验收前，不能宣称已切换成功或机器人在线。升级与检查不会停止、迁移或重建现有容器及登录数据。
 
 ## 机器人配置：默认不开口
 
@@ -97,7 +98,7 @@ export QQ_LLM_API_KEY='填入你自己的密钥'
 
 新用户先使用上面的原生优先接入流程；已有 Docker 实例不必迁移。若需要插件管理既有容器，必须显式覆盖 `snowLumaMode: docker`，保留原容器、部署文件与登录卷。升级插件不会自动修改这些服务，默认 `native` 也不会替你停止现有容器。
 
-[Compose 模板](../deploy/snowluma.compose.yml)只是兼容用外部部署配置，不包含 SnowLuma 镜像或 QQ 软件，不会自动运行。请先根据供应方文档确认镜像来源、授权条款、部署/自动化权限与当前要求；上文固定版本 EULA 5.4 的事先书面授权要求同样不能由插件 MIT 或本文示例替代。
+[Compose 模板](../deploy/snowluma.compose.yml)只是兼容用外部部署配置，不包含 SnowLuma 镜像或 QQ 软件，不会自动运行。请先根据供应方文档确认镜像来源、授权条款、部署/自动化权限与当前要求；插件 MIT 和本文示例不替代上游授权。
 
 模板要求显式设置 `SNOWLUMA_IMAGE`，优先使用审核过且固定 digest 的镜像引用。不要将本文当作某一镜像的官方支持承诺。模板为了兼容 QQ 注入设置 `SYS_PTRACE` 和 `seccomp:unconfined`，会降低容器隔离，**仅对可信镜像使用**。HTTP、WebSocket、管理页和远程桌面端口均只绑定 `127.0.0.1`。
 
@@ -144,7 +145,7 @@ snowLumaComposeFile: ''          # 既有 Docker 部署文件位置记录；不�
 4. 验证原账号、事件流、完整历史和学习库后，在插件管理器停用旧面板及旧 QQ MCP 入口，避免重复工具和重复设置页。保留旧源码、服务定义和备份便于回滚。
 5. 回滚时，先在插件管理器停用统一插件，确认托管子进程已退出，再恢复旧服务及旧面板/MCP。不要直接启用旧服务与托管机器人抢占同一个控制端口。
 
-SnowLuma 外部服务、既有容器与登录卷无须迁移或重建。本文迁移步骤只涉及 **机器人托管归属**，不代表原生 SnowLuma 已安装，也不代表完成 Docker → 原生后端迁移；此类迁移须另行规划授权、停机、登录态与回滚。既有 Docker 管理继续使用 `snowLumaMode: docker`，不要仅为符合默认值更换运行方式。前端插件变更后刷新原 DSH 页面；Host 安装状态正常不代表浏览器已经加载最新面板，也不代表完成截图/视觉验收。
+上述迁移只涉及 **机器人托管归属**，SnowLuma 外部服务、既有容器与登录卷无须重建。需要 Docker → 原生后端切换时使用[单独的备份、停机与回滚流程](./native.md#从-docker-切换到原生)，不能把安装准备或等待二维码当作迁移完成。继续使用既有 Docker 时保留 `snowLumaMode: docker`。前端插件变更后刷新原 DSH 页面；Host 安装状态正常不代表浏览器已经加载最新面板，也不代表完成截图/视觉验收。
 
 ## 开发、测试与打包
 

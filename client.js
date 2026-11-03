@@ -48,14 +48,14 @@ window.__ModuleLoader__.load({
     const copy = { zh: { title: 'QQ 机器人', overview: '总览', settings: '设置与订阅', memory: '人物与记忆', chats: '对话', ops: '运维' },
       en: { title: 'QQ bot', overview: 'Overview', settings: 'Settings & subscriptions', memory: 'People & memory', chats: 'Chats', ops: 'Operations' } };
     Object.assign(copy.zh, {
-      setup: '原生接入', setupTitle: '首次接入 · 原生优先', setupIntro: '先在 DSH 宿主机手动准备原生 QQ 网关，再检测本机 OneBot 连接；本页不会安装或启动上游。',
+      setup: '原生接入', setupTitle: '首次接入 · 原生优先', setupIntro: '用可审查安装脚本准备宿主机原生 QQ 网关，再检测 OneBot 连接；网页不会代执行管理员命令。',
       setupDocker: '现有 Docker 保持不变：不会停止、删除或迁移容器。Docker 兼容管理仍在「运维」；检测成功也不代表已安装原生服务。',
-      setupPrep: '1 · 手动准备与依赖检查', setupRefresh: '刷新依赖检查', setupLoading: '正在读取接入信息…', setupUnavailable: '接入信息不可用；请确认宿主已提供 /setup 接口后重试。其他功能仍可从页签访问。',
+      setupPrep: '1 · 原生安装与依赖检查', setupRefresh: '刷新依赖检查', setupLoading: '正在读取接入信息…', setupUnavailable: '接入信息不可用；请确认宿主已提供 /setup 接口后重试。其他功能仍可从页签访问。',
       setupHost: 'DSH 宿主环境', setupUnknown: '尚未检查', setupPass: '通过', setupFail: '未就绪', setupChecksEmpty: '宿主未提供依赖检查结果，不能据此认定已安装。',
       setupQQ: '原生 Linux QQ', setupXvfb: 'Xvfb（无图形界面时使用）', setupFfmpeg: 'ffmpeg（音视频能力）',
-      setupManual: '请自行阅读上游 EULA，并按官方手册下载、安装、启动和登录 QQ；配置 OneBot HTTP / WebSocket 仅监听宿主回环地址。Linux 无桌面环境请按手册准备 Xvfb；音视频能力还需 ffmpeg。',
-      setupEula: '未获得上游 EULA 5.4 要求的书面授权前，禁止自动部署。此页不提供自动安装，不代表你接受 EULA，也不会替你接受。',
-      setupAuto: '自动部署：已禁用', setupRelease: '官方原版下载', setupManualLink: '官方手册', setupEulaLink: '阅读 EULA', setupQQLink: '官方 QQ', setupNoLinks: '宿主尚未提供官方链接，请勿使用不明镜像或自动安装脚本。',
+      setupManual: '先打开原生安装指南，下载审查脚本并预览计划；确认后由宿主管理员安装依赖、原版 SnowLuma 和 QQ。服务不自动启动，协议确认及扫码需本人完成。',
+      setupEula: '请自行核实上游 EULA 和使用许可。脚本不代接受协议、不绕过扫码、不停止或删除 Docker；迁移须在原生登录验收后切换。',
+      setupInstaller: '原生安装指南', setupScript: '查看安装脚本', setupAuto: '管理员安装脚本 · 网页不自动执行', setupRelease: '官方原版下载', setupManualLink: '官方手册', setupEulaLink: '阅读 EULA', setupQQLink: '官方 QQ', setupNoLinks: '宿主尚未提供官方链接，请勿使用不明镜像或自动安装脚本。',
       setupService: '原生服务参考（不是已安装证明）', setupUserScope: '用户级', setupSystemScope: '系统级',
       setupConnect: '2 · 检测并保存本机连接', setupLocal: 'localhost 指 DSH 宿主机，不是浏览器所在电脑。只接受本机端点；检测会调用 OneBot HTTP get_login_info，并检查 WebSocket 能否建立连接（最多 5 秒），不写配置。',
       setupHttp: 'OneBot HTTP 地址', setupWs: 'OneBot WebSocket 地址（可选）', setupTokenMode: 'OneBot Token 处理', setupReuse: '沿用当前 Token（仅同一端点）', setupReplace: '输入新 Token', setupNone: '明确不使用 Token',
@@ -68,14 +68,14 @@ window.__ModuleLoader__.load({
       setupBusy: '另一个设置保存仍在进行，请稍后再试。', setupEndpointError: '请输入合法的本机 HTTP / WebSocket 地址，不含账号、密码、查询参数或片段。', setupTokenError: '更换端点不能沿用旧 Token；请选择输入新 Token 或明确不使用 Token。', setupNewTokenError: '请输入新 Token；如无需 Token，请明确选择不使用。', setupModelError: '同时设置模型时，请填写模型名称和 Base URL。', setupCheckFailed: '检测失败；未保存配置。', setupSaveFailed: '保存未确认成功；请先刷新核查，勿盲目重复提交。', setupError: '请求失败',
     });
     Object.assign(copy.en, {
-      setup: 'Native setup', setupTitle: 'First-run setup · native first', setupIntro: 'Manually prepare the native QQ gateway on the DSH host, then test its local OneBot connection. This page never installs or starts upstream software.',
+      setup: 'Native setup', setupTitle: 'First-run setup · native first', setupIntro: 'Prepare the native QQ gateway with the reviewable host installer, then test OneBot. This page does not execute administrator commands.',
       setupDocker: 'Existing Docker stays unchanged: no containers are stopped, removed or migrated. Docker compatibility controls remain in Operations. A successful probe does not mean a native service is installed.',
-      setupPrep: '1 · Manual preparation & dependency checks', setupRefresh: 'Refresh dependency checks', setupLoading: 'Loading setup information…', setupUnavailable: 'Setup is unavailable. Check that the Host provides /setup, then retry. Other tabs remain accessible.',
+      setupPrep: '1 · Native installation & dependency checks', setupRefresh: 'Refresh dependency checks', setupLoading: 'Loading setup information…', setupUnavailable: 'Setup is unavailable. Check that the Host provides /setup, then retry. Other tabs remain accessible.',
       setupHost: 'DSH host', setupUnknown: 'Not checked', setupPass: 'Ready', setupFail: 'Not ready', setupChecksEmpty: 'The Host provided no dependency results. Installation cannot be assumed.',
       setupQQ: 'Native Linux QQ', setupXvfb: 'Xvfb (for headless hosts)', setupFfmpeg: 'ffmpeg (audio/video features)',
-      setupManual: 'Read the upstream EULA yourself, then use the official manual to download, install, start and log in to QQ. Bind OneBot HTTP / WebSocket to host loopback only. Prepare Xvfb for headless Linux and ffmpeg for audio/video as documented.',
-      setupEula: 'Automatic deployment is prohibited without written authorization required by upstream EULA 5.4. This page has no automatic installer and does not accept the EULA on your behalf.',
-      setupAuto: 'Automatic deployment: disabled', setupRelease: 'Official original release', setupManualLink: 'Official manual', setupEulaLink: 'Read EULA', setupQQLink: 'Official QQ', setupNoLinks: 'No official links supplied by the Host. Do not use unknown mirrors or automatic installation scripts.',
+      setupManual: 'Open the native installation guide, review the script and preview its plan. A host administrator can explicitly install dependencies and original SnowLuma/QQ. Services do not start automatically; review agreements and scan QQ yourself.',
+      setupEula: 'Verify the upstream terms and your permission to use them. The script never accepts agreements, bypasses QR login, or stops/removes Docker. Switch only after native login is verified.',
+      setupInstaller: 'Native install guide', setupScript: 'Review installer', setupAuto: 'Administrator installer · not executed by this page', setupRelease: 'Official original release', setupManualLink: 'Official manual', setupEulaLink: 'Read EULA', setupQQLink: 'Official QQ', setupNoLinks: 'No official links supplied by the Host. Do not use unknown mirrors or automatic installation scripts.',
       setupService: 'Native service reference (not proof of installation)', setupUserScope: 'User scope', setupSystemScope: 'System scope',
       setupConnect: '2 · Test & save a local connection', setupLocal: 'localhost means the DSH host, not the computer running your browser. Only local endpoints are accepted. Testing calls HTTP get_login_info and checks that WebSocket can open (up to 5 seconds), without writing configuration.',
       setupHttp: 'OneBot HTTP URL', setupWs: 'OneBot WebSocket URL (optional)', setupTokenMode: 'OneBot token handling', setupReuse: 'Reuse current token (same endpoint only)', setupReplace: 'Enter a new token', setupNone: 'Explicitly use no token',
@@ -838,10 +838,10 @@ window.__ModuleLoader__.load({
           placeholder: options.placeholder || '', onChange: (event) => change(key, event.target.value) }));
       const current = info?.current || {};
       const checks = Array.isArray(info?.checks) ? info.checks : [];
-      const linkRows = [['release', 'setupRelease'], ['manual', 'setupManualLink'], ['eula', 'setupEulaLink'], ['qq', 'setupQQLink']];
+      const linkRows = [['installerGuide', 'setupInstaller'], ['installerScript', 'setupScript'], ['release', 'setupRelease'], ['manual', 'setupManualLink'], ['eula', 'setupEulaLink'], ['qq', 'setupQQLink']];
       const links = linkRows.flatMap(([key, label]) => {
         try {
-          const url = new URL(info?.links?.[key]);
+          const url = new URL(key === 'installerGuide' ? info?.automaticInstall?.guide : key === 'installerScript' ? info?.automaticInstall?.script : info?.links?.[key]);
           if (url.protocol !== 'https:' || url.username || url.password) return [];
           return [h('a', { key, href: url.href, target: '_blank', rel: 'noopener noreferrer', style: { color: T.accent } }, tr(label))];
         } catch { return []; }

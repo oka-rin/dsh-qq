@@ -26,6 +26,8 @@ test('setup status never exposes tokens/keys and does not execute deployment com
   const setup = createSetup({ configPath: f.configPath, run: async () => { commands++; return ''; } });
   const status = await setup.status();
   assert.equal(status.preferredMode, 'native'); assert.equal(status.automaticInstall.available, false);
+  assert.equal(status.automaticInstall.scriptAvailable, true);
+  assert.match(status.automaticInstall.script, /scripts\/install-native\.sh$/);
   assert.equal(status.current.hasToken, true); assert.equal(status.current.hasApiKey, true);
   assert.ok(!JSON.stringify(status).includes('secret')); assert.equal(commands, 0);
 });

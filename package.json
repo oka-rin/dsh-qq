@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "QQ bot integration for DeepSeek Harness: bundled bot, SnowLuma/OneBot connection, control panel and QQ tools. SnowLuma itself is external.",
   "type": "module",
   "license": "MIT",
@@ -29,10 +29,12 @@
     "bot/snowluma-api-catalog.json",
     "locale/*.json",
     "scripts/*.mjs",
+    "scripts/install-native.sh",
     "test/*.test.mjs",
     "icon.svg",
     "README.md",
     "docs/advanced.md",
+    "docs/native.md",
     "LICENSE"
   ],
   "scripts": {

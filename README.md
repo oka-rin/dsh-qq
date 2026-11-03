@@ -2,7 +2,7 @@
 
 **让 DeepSeek Harness 接入你的 QQ：聊天、看图看视频、查记录、发消息，都在一个插件里。**
 
-[安装使用](#安装使用) · [高级配置](./docs/advanced.md) · [反馈问题](https://github.com/oka-rin/dsh-qq/issues)
+[安装使用](#安装使用) · [原生安装与 Docker 迁移](./docs/native.md) · [高级配置](./docs/advanced.md) · [反馈问题](https://github.com/oka-rin/dsh-qq/issues)
 
 ## 能做什么
 
@@ -24,7 +24,13 @@
 - **已登录 QQ 的 SnowLuma / OneBot 后端**，拿到它的 HTTP、WebSocket 地址和 Token。
 - **模型接口**：OpenAI 兼容的接口地址、模型名和 API Key。
 
-**没有 QQ 后端？** 先按 [SnowLuma 官方指南](https://snowluma.github.io/zh/docs/guide/quickstart)安装、登录 QQ，再回来连接。插件不会替你安装 SnowLuma 或扫码；已有后端不用重装。[原生接入与许可说明](./docs/advanced.md#上游条款与支持边界)
+**没有 QQ 后端？** Debian/Ubuntu + systemd 可使用仓库的[原生安装脚本与指南](./docs/native.md)，准备官方原版 SnowLuma **v2.4.0 完整包**和你提供的原版 QQ。先在仓库根目录预览：
+
+```bash
+bash scripts/install-native.sh --plan
+```
+
+默认只读；实际安装需显式确认、指定版本和 QQ 来源。脚本不代接受上游条款、不自动启动服务或扫码。安装后由你审核、启动并登录，再回来连接。也可按 [SnowLuma 官方指南](https://snowluma.github.io/zh/docs/guide/quickstart)自行部署；已有后端不用重装。
 
 ### 2. 安装插件
 
@@ -72,12 +78,13 @@
 
 **看不到图片或视频？** 图片需要支持视觉的模型；动图和视频还需要 `ffmpeg` / `ffprobe`。大视频下载和抽帧需要时间，没拿到画面时不应编造内容。
 
-**已经用 Docker 跑着 SnowLuma？** 直接连接原实例，不用迁移或清空登录数据。需要插件管理该容器时，使用 Docker 兼容模式。[具体配置](./docs/advanced.md#既有-docker-后端兼容非默认)
+**已经用 Docker 跑着 SnowLuma？** 可继续连接原实例，使用 [Docker 兼容模式](./docs/advanced.md#既有-docker-后端兼容非默认)。想迁到原生时按[备份、切换与回滚步骤](./docs/native.md#从-docker-切换到原生)操作；安装脚本不会停止容器、复制登录态或删除卷，扫码登录和验收仍需人工完成。
 
 **更新会丢聊天记录吗？** 配置、聊天归档和学习数据放在独立数据目录，不在插件代码里。沿用原 `dataDir` 并先备份，不要另开一个机器人实例。[迁移与回滚](./docs/advanced.md#从拆分部署迁移与回滚)
 
 ## 更多
 
-- [高级配置与运维](./docs/advanced.md)：配置字段、原生/systemd、Docker、数据目录、迁移和安全边界。
+- [原生安装与 Docker 迁移](./docs/native.md)：只读预览、显式安装、受保护的登录、切换与回滚。
+- [高级配置与运维](./docs/advanced.md)：配置字段、systemd、Docker、数据目录和安全边界。
 - [参与开发](./CONTRIBUTING.md) · [报告安全问题](./SECURITY.md) · [更新记录](./CHANGELOG.md)
-- 源码采用 [MIT](./LICENSE)。SnowLuma、QQ 和模型服务遵循各自条款；本插件不自动安装外部后端。
+- 源码采用 [MIT](./LICENSE)。SnowLuma、QQ 和模型服务遵循各自条款；插件安装或连接不会隐式运行后端安装脚本。
