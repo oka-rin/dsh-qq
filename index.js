@@ -125,7 +125,7 @@ export const Config = Schema.object({
   snowLumaServiceScope: Schema.union(['system', 'user']).default('system').description('原生 systemd 服务范围'),
   snowLumaComposeFile: Schema.string().default('').description('兼容模式：SnowLuma compose 文件绝对路径；不会自动启动网关'),
   snowLumaContainer: Schema.string().default('snowluma').description('用于查看状态及启停的 Docker 容器名称'),
-  snowLumaDisplay: Schema.string().default(':99').description('原生 QQ 本机 X11 显示编号；扫码仅读取核实归属的 QQ 窗口'),
+  snowLumaDisplay: Schema.string().default(':99').description('原生 QQ 本机 X11 显示编号；网页登录仅连接核实归属的 QQ 窗口'),
   snowLumaXauthority: Schema.string().default('/var/lib/snowluma/.Xauthority').description('原生 QQ Xauthority 绝对路径；文件缺失时拒绝访问，仅无认证的旧专用显示可显式留空'),
 });
 

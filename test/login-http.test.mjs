@@ -13,8 +13,6 @@ async function fixture(t, options = {}) {
   const prepared = () => ({ wsPath: root + '/desktop/ws', protocols: ['binary', 'dsh-qq-session.synthetic-secret'], expiresAt: Date.now() + 120000, sessionExpiresAt: Date.now() + 600000 });
   const login = {
     status: async ({ signal }) => { calls.push(['status', signal]); return { ok: true, state: 'unavailable' }; },
-    qr: async ({ signal }) => { calls.push(['qr', signal]); return { ok: true, image: 'data:image/png;base64,ZmFrZQ==' }; },
-    refresh: async ({ signal }) => { calls.push(['refresh', signal]); return { ok: true }; },
     dispose: () => calls.push(['login.dispose']), ...options.login,
   };
   const desktop = {
@@ -30,6 +28,7 @@ async function fixture(t, options = {}) {
       if (options.throwAuth) throw new Error('auth unavailable');
       if (!authenticated || req.headers['x-auth'] !== 'yes') return 401;
       const host = req.headers.host;
+      if (host !== authority) return 403;
       if (req.headers.origin && ![`http://${host}`, `https://${host}`].includes(req.headers.origin)) return 403;
     } },
     webServer: {
@@ -51,19 +50,20 @@ async function fixture(t, options = {}) {
     if (handler) handler(req, socket, head); else socket.destroy();
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port, origin = `http://127.0.0.1:${port}`;
+  const port = server.address().port, authority = options.publicHost || `127.0.0.1:${port}`, origin = `http://${authority}`;
+  const transport = `http://127.0.0.1:${port}`;
   const dispose = () => { if (!disposed) { disposed = true; api.dispose(); for (const fn of disposers.reverse()) fn(); } };
   t.after(async () => { dispose(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const request = (path, { method = 'GET', headers = {}, body, auth = true, prefix = '' } = {}) => new Promise((resolve, reject) => {
     const data = body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
-    const req = http.request(origin + prefix + root + path, { method, headers: { ...(auth ? { 'x-auth': 'yes' } : {}), ...(method === 'POST' ? { origin, 'content-type': 'application/json' } : {}), ...headers } }, res => {
+    const req = http.request(transport + prefix + root + path, { method, headers: { host: authority, ...(auth ? { 'x-auth': 'yes' } : {}), ...(method === 'POST' ? { origin, 'content-type': 'application/json' } : {}), ...headers } }, res => {
       const chunks = []; res.on('data', c => chunks.push(c)); res.on('end', () => { const text = Buffer.concat(chunks).toString(); let json; try { json = JSON.parse(text); } catch {} resolve({ status: res.statusCode, headers: res.headers, text, json }); });
     });
     req.on('error', reject); req.end(data);
   });
-  const upgrade = (path = '/desktop/ws', headers = {}) => new Promise((resolve, reject) => {
+  const upgrade = (path = '/desktop/ws', headers = {}, prefix = '') => new Promise((resolve, reject) => {
     const socket = net.connect(port, '127.0.0.1'); let result = '';
-    socket.on('connect', () => socket.write(`GET ${root}${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n${Object.entries({ 'x-auth': 'yes', origin, ...headers }).map(([key, value]) => `${key}: ${value}\r\n`).join('')}\r\n`));
+    socket.on('connect', () => socket.write(`GET ${prefix}${root}${path} HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n${Object.entries({ host: authority, 'x-auth': 'yes', origin, ...headers }).map(([key, value]) => `${key}: ${value}\r\n`).join('')}\r\n`));
     socket.on('data', chunk => { result += chunk; if (result.includes('\r\n\r\n')) { socket.destroy(); resolve(result); } });
     socket.on('error', reject);
   });
@@ -74,7 +74,7 @@ const post = (body = {}, headers = {}) => ({ method: 'POST', body, headers });
 
 test('every HTTP route and upgrade authenticates; absent/failing Connection fails closed', async t => {
   const f = await fixture(t);
-  for (const [path, method] of [['/status', 'GET'], ['/qr', 'POST'], ['/refresh', 'POST'], ['/desktop/session', 'POST'], ['/desktop/close', 'POST'], ['/desktop/view', 'GET'], ['/desktop/info', 'GET'], ['/desktop/viewer.js', 'GET']]) {
+  for (const [path, method] of [['/status', 'GET'], ['/desktop/session', 'POST'], ['/desktop/close', 'POST'], ['/desktop/view', 'GET'], ['/desktop/info', 'GET'], ['/desktop/viewer.js', 'GET']]) {
     const r = await f.request(path, { method, ...(method === 'POST' ? { body: {} } : {}), auth: false }); assert.equal(r.status, 401); assert.equal(r.headers['cache-control'], 'no-store');
   }
   assert.match(await f.upgrade(), /^HTTP\/1.1 403/);
@@ -92,10 +92,58 @@ test('POST JSON and same-origin CSRF enforced before operations; trusted TLS pro
     post('true'), post('[]'), post('1'), post('null'), post('{bad'), post({ command: 'sh' }),
   ]) assert.notEqual((await f.request('/desktop/session', options)).status, 200);
   assert.ok(!f.calls.some(([name]) => name === 'start'));
-  assert.equal((await f.request('/refresh', post())).status, 400);
-  assert.equal((await f.request('/refresh', post({ confirm: true }))).status, 200);
   const r = await f.request('/desktop/session', post({}, { origin: f.origin.replace('http:', 'https:') }));
   assert.equal(r.status, 200); assert.match(r.headers['set-cookie'][0], /; Secure/); assert.match(r.headers['set-cookie'][0], /; HttpOnly; SameSite=Strict/);
+});
+
+test('QR and refresh routes are absent; backend login status remains available', async t => {
+  const f = await fixture(t);
+  for (const action of ['qr', 'refresh']) {
+    assert.equal(f.routes.has(root + '/' + action), false);
+    for (const method of ['GET', 'POST']) assert.equal((await f.request('/' + action, { method, ...(method === 'POST' ? { body: '{}' } : {}) })).status, 404);
+  }
+  const status = await f.request('/status');
+  assert.equal(status.status, 200); assert.equal(status.json.state, 'unavailable');
+  assert.ok(f.calls.some(([name]) => name === 'status'));
+});
+
+for (const prefix of ['', '/dsh']) test(`ordinary public HTTP Host supports authenticated desktop lifecycle at ${prefix || '/'}`, async t => {
+  const f = await fixture(t, { publicHost: 'qq-login.example.test:3080' });
+  const request = (path, options = {}) => f.request(path, { ...options, prefix });
+  const upgrade = headers => f.upgrade('/desktop/ws', headers, prefix);
+  assert.equal((await request('/desktop/session', { ...post(), auth: false })).status, 401);
+  assert.equal((await request('/desktop/session', post({}, { origin: 'http://attacker.example' }))).status, 403);
+  assert.equal((await request('/desktop/session', post({}, { origin: '' }))).status, 400);
+  assert.equal((await request('/desktop/session', post({}, { 'sec-fetch-site': 'cross-site' }))).status, 400);
+  assert.equal((await request('/desktop/session', post({}, { host: 'wrong.example', origin: 'http://wrong.example' }))).status, 403);
+  assert.ok(!f.calls.some(([name]) => name === 'start'));
+  const r = await request('/desktop/session', post());
+  assert.equal(r.status, 200); const cookie = cookieOf(r);
+  assert.match(r.headers['set-cookie'][0], /; HttpOnly; SameSite=Strict/);
+  assert.doesNotMatch(r.headers['set-cookie'][0], /; Secure/);
+  for (const page of ['view', 'info', 'viewer.js']) {
+    assert.equal((await request('/desktop/' + page, { auth: false, headers: { cookie } })).status, 401);
+    assert.equal((await request('/desktop/' + page)).status, 400);
+    const response = await request('/desktop/' + page, { headers: { cookie } });
+    assert.equal(response.status, 200);
+    if (page === 'view') {
+      assert.match(response.text, /HTTP 连接未加密/); assert.match(response.text, /id="close"/);
+      assert.match(response.text, /不要发送到聊天/); assert.match(response.text, /刷新或断线后/);
+    }
+    if (page === 'info') assert.equal(response.json.wsPath, root + '/desktop/ws');
+  }
+  assert.match(await upgrade({ cookie, 'x-auth': 'no' }), /^HTTP\/1.1 403/);
+  assert.match(await upgrade({ cookie, origin: 'http://attacker.example' }), /^HTTP\/1.1 403/);
+  assert.match(await upgrade({ cookie, host: 'wrong.example', origin: 'http://wrong.example' }), /^HTTP\/1.1 403/);
+  assert.match(await upgrade({}), /^HTTP\/1.1 403/);
+  assert.ok(!f.calls.some(([name]) => name === 'upgrade'));
+  assert.match(await upgrade({ cookie }), /^HTTP\/1.1 101/);
+  assert.match(await upgrade({ cookie }), /^HTTP\/1.1 403/);
+  for (const page of ['view', 'info', 'viewer.js']) assert.equal((await request('/desktop/' + page, { headers: { cookie } })).status, 400);
+  assert.equal((await request('/desktop/close', post({}, { cookie, origin: 'http://attacker.example' }))).status, 403);
+  assert.equal((await request('/desktop/close', post({}, { cookie }))).status, 200);
+  assert.equal(f.calls.filter(([name]) => name === 'upgrade').length, 1);
+  assert.equal(f.calls.filter(([name]) => name === 'stop').length, 1);
 });
 
 test('owner credential never appears in URL/JSON; another browser cannot open, read or close desktop', async t => {
@@ -136,7 +184,7 @@ test('stale capabilities and used viewers fail, while owner may explicitly close
   assert.equal((await f.request('/desktop/close', post({}, { cookie }))).status, 200);
 });
 
-test('bounded tiny JSON and limited parallel operations; status and QR receive cancellation signals', async t => {
+test('bounded tiny JSON and limited parallel operations; status receives cancellation signals', async t => {
   const pending = deferred(), entered = deferred(); const signals = [];
   const f = await fixture(t, { login: { status: async ({ signal }) => { signals.push(signal); if (signals.length === 8) entered.resolve(); await pending.promise; return { ok: true }; } } });
   assert.equal((await f.request('/desktop/session', post(' '.repeat(4097)))).status, 400);
@@ -158,16 +206,16 @@ test('async start disposal cancels backend promptly, invalidates captured routes
   f.api.dispose(); assert.equal(f.calls.filter(([name]) => name === 'desktop.dispose').length, 1);
 });
 
-test('browser disconnect aborts QR and cancels pending desktop start before it resolves', async t => {
+test('browser disconnect aborts status and cancels pending desktop start before it resolves', async t => {
   const entered = deferred(), pending = deferred(), stopped = deferred(); let signal;
   const f = await fixture(t, { desktop: { start: async () => { entered.resolve(); await pending.promise; return f.prepared(); }, stop: () => stopped.resolve() } });
   const req = http.request(f.origin + root + '/desktop/session', { method: 'POST', headers: { 'x-auth': 'yes', origin: f.origin, 'content-type': 'application/json' } });
   req.on('error', () => {}); req.end('{}'); await entered.promise; req.destroy(); await stopped.promise;
   pending.resolve(); await new Promise(resolve => setImmediate(resolve));
-  const qrEntered = deferred(), qrStopped = deferred();
-  const q = await fixture(t, { login: { qr: async options => { signal = options.signal; signal.addEventListener('abort', () => qrStopped.resolve(), { once: true }); qrEntered.resolve(); return new Promise(() => {}); } } });
-  const qr = http.request(q.origin + root + '/qr', { method: 'POST', headers: { 'x-auth': 'yes', origin: q.origin, 'content-type': 'application/json' } });
-  qr.on('error', () => {}); qr.end('{}'); await qrEntered.promise; qr.destroy(); await qrStopped.promise; assert.equal(signal.aborted, true);
+  const statusEntered = deferred(), statusStopped = deferred();
+  const q = await fixture(t, { login: { status: async options => { signal = options.signal; signal.addEventListener('abort', () => statusStopped.resolve(), { once: true }); statusEntered.resolve(); return new Promise(() => {}); } } });
+  const status = http.request(q.origin + root + '/status', { headers: { 'x-auth': 'yes' } });
+  status.on('error', () => {}); status.end(); await statusEntered.promise; status.destroy(); await statusStopped.promise; assert.equal(signal.aborted, true);
 });
 
 test('WS wrapper catches backend exceptions and blocks revoked authentication and post-disposal callbacks', async t => {

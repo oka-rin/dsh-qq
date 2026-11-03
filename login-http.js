@@ -5,7 +5,7 @@ import { assertLoginRequest } from './login.js';
 const ROOT = '/dsh-qq/login';
 const COOKIE = 'dsh_qq_desktop';
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' };
-const VIEW = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQ 登录窗口</title></head><body style="margin:0;height:100vh;display:flex;flex-direction:column;background:#171717;color:#eee;font:14px system-ui"><p id="status" style="margin:8px;flex:none" role="status">连接 QQ 登录窗口…</p><div id="screen" style="flex:1;min-height:0;overflow:hidden"></div><script src="./viewer.js" defer></script></body></html>';
+const VIEW = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQ 登录窗口</title></head><body style="margin:0;height:100vh;display:flex;flex-direction:column;background:#171717;color:#eee;font:14px system-ui"><header style="padding:8px;flex:none"><button id="close" type="button">关闭登录窗口并返回 QQ 设置</button><p id="transport-warning" role="note" style="color:#ffd580;margin:8px 0">HTTP 连接未加密：QQ 窗口画面、键盘输入及登录信息可能被网络中的其他人读取或篡改。仅在可信网络继续；密码只在原版 QQ 窗口输入，不要发送到聊天。</p><p id="status" style="margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere" role="status">连接 QQ 登录窗口…</p><p style="margin:8px 0">连接仅可使用一次，最长 10 分钟；刷新或断线后，请返回 QQ 设置重新打开。</p></header><div id="screen" style="flex:1;min-height:0;overflow:hidden"></div><script src="./viewer.js" defer></script></body></html>`;
 const cancelled = () => new Error('登录请求已取消');
 
 function until(promise, signal) {
@@ -67,7 +67,7 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath }) {
   }
   function mutation(req) {
     // Only after Connection has authenticated and validated this Host/Origin.
-    // HTTPS Origin is authoritative here for a trusted TLS-terminating proxy.
+    // Connection remains authoritative for both ordinary HTTP and TLS proxies.
     assertLoginRequest(req, { trustedOrigin: req.headers.origin });
   }
   function owner(req) {
@@ -100,21 +100,13 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath }) {
     const value = await until(login.status({ signal }), signal);
     send(res, 200, value);
   });
-  for (const action of ['qr', 'refresh']) exact(`/${action}`, async (req, res, signal) => {
-    mutation(req);
-    const input = await body(req, signal);
-    if (Object.keys(input).some(key => key !== 'confirm')) throw new Error('登录请求不接受窗口、路径或命令参数');
-    if (action === 'refresh' && input.confirm !== true) throw new Error('更新二维码需要明确确认');
-    const value = await until(login[action]({ signal }), signal);
-    send(res, 200, value);
-  });
+
   exact('/desktop/session', async (req, res, signal) => {
     mutation(req);
     const input = await body(req, signal);
     if (Object.keys(input).length) throw new Error('桌面请求不接受参数');
     if (signal.aborted) throw cancelled();
     const origin = new URL(req.headers.origin);
-    if (origin.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) throw new Error('QQ 密码登录需要 HTTPS 或本机 loopback 页面');
     if (busy || (session && Date.now() < session.expiresAt && !owner(req))) throw new Error('已有另一个 QQ 登录窗口，请先关闭或等待过期');
     busy = true;
     session = null; // start replaces the backend session; never retain stale credentials on failure.
