@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { createCipheriv } from 'node:crypto';
 import { createOriginalLogin, originalRedirect } from '../original-login.js';
+import { registerLoginHttp } from '../login-http.js';
+import { Readable } from 'node:stream';
+import { EventEmitter } from 'node:events';
+import { Config } from '../index.js';
 
 const path = '/vnc.html?autoconnect=1&resize=scale';
 const html = '<!DOCTYPE html><html><head><title>noVNC</title></head><body id="noVNC_container"></body></html>';
@@ -242,6 +246,137 @@ test('credential source buffers are cleared after success and parse failure', as
   const bad = Buffer.from('malformed private-secret');
   const broken = passwordFixture({ run: async () => bad });
   await assert.rejects(broken.login.password(), /无法安全读取并核实/); assert.ok(bad.every(b => b === 0));
+});
+
+test('native Config is opt-in and accepts only integer ports in range', () => {
+  assert.equal(Config({}).snowLumaDesktopPort, 0);
+  for (const port of [0, 1, 6081, 65535]) assert.equal(Config({ snowLumaDesktopPort: port }).snowLumaDesktopPort, port);
+  for (const port of [-1, 65536, 1.5, '6081', NaN, Infinity]) assert.throws(() => Config({ snowLumaDesktopPort: port }));
+});
+
+for (const port of [1, 6081, 65535]) test(`native original probes only fixed loopback noVNC at port ${port} without commands or credentials`, async () => {
+  const f = fixture({ mode: 'native', nativePort: port, container: ';unused', host: 'attacker.test', path: '/arbitrary', url: 'https://attacker.test/' });
+  assert.deepEqual(await f.login.target({ port: 4444, path: '/arbitrary', url: 'https://attacker.test/' }), { port, path });
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0][0], `http://127.0.0.1:${port}/vnc.html`);
+  assert.equal(f.requests[0][1].redirect, 'error');
+  assert.equal(f.requests[0][1].credentials, 'omit');
+  assert.equal(f.requests[0][1].cache, 'no-store');
+});
+for (const nativePort of [-1, 65536, 1.5, '6081', NaN, Infinity, null, {}, '6081/vnc.html', 'http://attacker.test']) test('native original rejects malformed ports before any operation', () => {
+  assert.throws(() => fixture({ mode: 'native', nativePort }), /原生端口无效/);
+});
+for (const mode of ['external', undefined]) test(`native port never enables original login in ${mode} mode`, async () => {
+  const f = fixture({ mode, nativePort: 6081 });
+  assert.equal(await f.login.target(), null);
+  await assert.rejects(f.login.password(), /无法安全读取并核实/);
+  assert.deepEqual(f.calls, []); assert.deepEqual(f.requests, []);
+});
+test('Docker original ignores native port and still discovers the existing publication', async () => {
+  const f = fixture({ nativePort: 4444 });
+  assert.deepEqual(await f.login.target(), { port: 6081, path });
+  assert.equal(f.calls[0][0], 'docker');
+});
+test('native probe rejects redirects, unrelated services and oversized output without a legacy fallback', async () => {
+  for (const fetcher of [async () => page('<html>unrelated</html>'), async () => ({ ok: true, redirected: true }), async () => page(html + 'x'.repeat(262144)), async () => { throw new Error('synthetic-secret'); }]) {
+    const f = fixture({ mode: 'native', nativePort: 6081, fetcher });
+    await assert.rejects(f.login.target(), error => /noVNC 尚未就绪/.test(error.message) && !error.message.includes('synthetic-secret'));
+    assert.deepEqual(f.calls, []);
+  }
+});
+test('native probe is cancelled on request abort/disposal and does not run after cancellation', async () => {
+  for (const dispose of [false, true]) {
+    let signal;
+    const f = fixture({ mode: 'native', nativePort: 6081, fetcher: (_url, options) => { signal = options.signal; return new Promise(() => {}); } });
+    const controller = new AbortController(), result = f.login.target({ signal: controller.signal });
+    await setImmediate(); if (dispose) f.login.dispose(); else controller.abort();
+    await assert.rejects(result, /已取消/); assert.equal(signal.aborted, true);
+    await assert.rejects(f.login.target({ signal: controller.signal }), /已取消/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+test('native probe retains the 4s deadline for an injected fetch ignoring cancellation', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] }); let signal;
+  const f = fixture({ mode: 'native', nativePort: 6081, fetcher: (_url, options) => { signal = options.signal; return new Promise(() => {}); } });
+  const result = f.login.target(); await setImmediate(); t.mock.timers.tick(4000);
+  await assert.rejects(result, /noVNC 尚未就绪/); assert.equal(signal.aborted, true); assert.equal(f.calls.length, 0);
+});
+
+function nativePasswordFixture(options = {}) {
+  return passwordFixture({ mode: 'native', nativePort: 6081, ...options });
+}
+test('native password uses only the fixed bounded binary credential command, never supplied paths or environment', async () => {
+  const f = nativePasswordFixture({ passwordPath: '/tmp/attacker', env: ['VNC_PASSWD=wrong'], container: ';unused' });
+  assert.deepEqual(await f.login.password({ path: '/tmp/attacker', password: 'wrong' }), { ok: true, password: 'testpass' });
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0][0], 'head');
+  assert.deepEqual(f.calls[0][1], ['-c', '8', '/var/lib/snowluma/.vnc/passwd']);
+  assert.equal(f.calls[0][2].timeoutMs, 8000); assert.equal(f.calls[0][2].maxOutputBytes, 8);
+  assert.ok(f.calls[0][2].signal instanceof AbortSignal);
+  assert.deepEqual(f.requests, []);
+});
+for (const value of ['a', 'abc def', '12345678']) test(`native password decodes and matches the actual VNC file for length ${value.length}`, async () => {
+  const file = vncFile(value), f = nativePasswordFixture({ run: async () => file });
+  assert.deepEqual(await f.login.password(), { ok: true, password: value });
+  assert.ok(file.every(byte => byte === 0));
+});
+for (const file of [Buffer.alloc(7), Buffer.alloc(9), Buffer.alloc(8), '87803c720bbb91d5', vncFile(''), vncFile('bad\u0000pad'), vncFile('bad\npass'), vncFile('\u007f')]) test('native password rejects invalid fixed source without a default and wipes buffers', async () => {
+  const source = Buffer.isBuffer(file) ? Buffer.from(file) : file;
+  const f = nativePasswordFixture({ run: async () => source });
+  await assert.rejects(f.login.password(), /无法安全读取并核实/);
+  if (Buffer.isBuffer(source)) assert.ok(source.every(byte => byte === 0));
+});
+test('native credential failures are sanitized without logging secret output', async t => {
+  const logged = [];
+  for (const name of ['log', 'warn', 'error', 'info', 'debug']) t.mock.method(console, name, (...args) => logged.push(args));
+  const f = nativePasswordFixture({ run: async () => { throw new Error('testpass QQ_PASSWORD=synthetic-secret /root/private'); } });
+  await assert.rejects(f.login.password(), error => /无法安全读取并核实/.test(error.message) && !/testpass|synthetic-secret|private/.test(error.message));
+  assert.deepEqual(logged, []);
+});
+test('native credential cancellation prevents execution, aborts hanging reads and sanitizes late failures', async () => {
+  let reject, signal, calls = 0;
+  const f = nativePasswordFixture({ run: (_bin, _args, options) => { calls++; signal = options.signal; return new Promise((_resolve, fail) => { reject = fail; }); } });
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(f.login.password({ signal: controller.signal }), /已取消/); assert.equal(calls, 0);
+  const result = f.login.password(); await setImmediate(); f.login.dispose();
+  await assert.rejects(result, /已取消/); assert.equal(signal.aborted, true);
+  reject(new Error('late synthetic-secret')); await setImmediate();
+  await assert.rejects(f.login.password(), /已取消/); assert.equal(calls, 1);
+});
+test('native credential runner remains bounded to 8s even when injected runner ignores abort', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] }); let signal;
+  const f = nativePasswordFixture({ run: (_bin, _args, options) => { signal = options.signal; return new Promise(() => {}); } });
+  const result = f.login.password(); await setImmediate(); t.mock.timers.tick(8000);
+  await assert.rejects(result, /无法安全读取并核实/); assert.equal(signal.aborted, true);
+});
+
+test('native original password remains browser-only authenticated same-origin POST with no request parameters', async () => {
+  const routes = new Map(), disposers = [], f = nativePasswordFixture();
+  const ctx = {
+    effect(fn) { const dispose = fn(); if (dispose) disposers.push(dispose); },
+    connection: { requestRejection(req) { return req.headers['x-auth'] === 'yes' ? 0 : 401; } },
+    webServer: { register({ path, handler }) { routes.set(path, handler); return () => routes.delete(path); }, registerUpgrade() { return () => {}; } },
+  };
+  const api = registerLoginHttp({ ctx, login: { dispose() {} }, desktop: { stop() {}, dispose() {} }, originalLogin: { ...f.login, redirect: originalRedirect } });
+  async function request({ method = 'POST', auth = true, headers = {}, input = {} } = {}) {
+    const req = Readable.from([Buffer.from(JSON.stringify(input))]);
+    req.method = method; req.url = '/dsh-qq/login/original/password';
+    req.headers = { host: 'localhost:3080', origin: 'http://localhost:3080', 'content-type': 'application/json', ...(auth ? { 'x-auth': 'yes' } : {}), ...headers };
+    const res = new EventEmitter();
+    res.writeHead = (status, values) => { res.status = status; res.headers = values; res.headersSent = true; };
+    res.end = text => { res.writableEnded = true; res.text = text; };
+    await routes.get(req.url)(req, res); return res;
+  }
+  try {
+    for (const options of [{ auth: false }, { method: 'GET' }, { headers: { origin: 'http://attacker.test' } }, { headers: { 'sec-fetch-site': 'cross-site' } }, { input: { path: '/tmp/attacker' } }, { input: { port: 4444 } }]) {
+      const denied = await request(options); assert.notEqual(denied.status, 200); assert.equal(denied.headers['cache-control'], 'no-store');
+    }
+    assert.equal(f.calls.length, 0);
+    const allowed = await request(); assert.equal(allowed.status, 200);
+    assert.deepEqual(JSON.parse(allowed.text), { ok: true, password: 'testpass' });
+    assert.equal(allowed.headers['cache-control'], 'no-store'); assert.equal(f.calls.length, 1);
+  } finally { api.dispose(); for (const dispose of disposers.reverse()) dispose(); }
 });
 
 const req = (host, encrypted = false, extra = {}) => ({ headers: { host, ...extra }, socket: { encrypted } });

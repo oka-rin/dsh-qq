@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -8,6 +8,12 @@ import { AgentLoop } from '../src/agent.mjs';
 const log = { info() {}, warn() {}, debug() {}, error() {} };
 const call = (name, args = {}) => ({ id: `t-${name}`, function: { name, arguments: JSON.stringify(args) } });
 const response = (...calls) => ({ tool_calls: calls });
+
+beforeEach((t) => {
+  // Quotas reset at local midnight; keep the 2-hour-old fixtures in today's ledger
+  // even when the suite runs just after midnight or in a different time zone.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 10, 4, 12).getTime() });
+});
 
 function harness(t, { logRows = [], agent = {}, recent = () => [] } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-private-'));

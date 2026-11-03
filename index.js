@@ -42,6 +42,7 @@ const DEFAULTS = {
   snowLumaServiceScope: 'system',
   snowLumaDisplay: ':99',
   snowLumaXauthority: '/var/lib/snowluma/.Xauthority',
+  snowLumaDesktopPort: 0,
 };
 
 function readJson(file, fallback = null) {
@@ -126,6 +127,7 @@ export const Config = Schema.object({
   snowLumaServiceScope: Schema.union(['system', 'user']).default('system').description('原生 systemd 服务范围'),
   snowLumaComposeFile: Schema.string().default('').description('兼容模式：SnowLuma compose 文件绝对路径；不会自动启动网关'),
   snowLumaContainer: Schema.string().default('snowluma').description('用于查看状态及启停的 Docker 容器名称'),
+  snowLumaDesktopPort: Schema.number().min(0).max(65535).step(1).default(0).description('原生原版 noVNC 已有端口；0 使用旧 QQ 窗口登录，1–65535 显式启用原版桌面；仅探测本机固定 /vnc.html，不启动服务'),
   snowLumaDisplay: Schema.string().default(':99').description('原生 QQ 本机 X11 显示编号；网页登录仅连接核实归属的 QQ 窗口'),
   snowLumaXauthority: Schema.string().default('/var/lib/snowluma/.Xauthority').description('原生 QQ Xauthority 绝对路径；文件缺失时拒绝访问，仅无认证的旧专用显示可显式留空'),
 });
@@ -574,9 +576,9 @@ export function apply(ctx, config = {}) {
     xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };
   const login = createLogin({ ...windowOptions, check: () => setup.check() });
   const desktop = createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
-  const original = createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer });
+  const original = createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer, nativePort: cfg.snowLumaDesktopPort });
   const loginHttp = registerLoginHttp({ ctx, login, desktop, readBody,
-    originalLogin: cfg.snowLumaMode === 'docker' ? { target: (options) => original.target(options), password: (options) => original.password(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
+    originalLogin: (cfg.snowLumaMode === 'docker' || (cfg.snowLumaMode === 'native' && cfg.snowLumaDesktopPort !== 0)) ? { target: (options) => original.target(options), password: (options) => original.password(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
     assetPath: path.join(PKG_DIR, 'assets/desktop-viewer.js') });
   const setupAction = async (action, input = {}) => {
     ensureDataDir();

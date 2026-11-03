@@ -154,28 +154,33 @@ async function probe(fetcher, port, signal) {
 }
 
 /**
- * Discover only the ORIGINAL, already-published Docker noVNC service. This does not
+ * Discover only the ORIGINAL, already-published Docker or opt-in native noVNC service. This does not
  * start a service, publish ports, or replace its separate VNC authentication.
  * password() is a separate user-only credential operation; never call it from
  * status, discovery, redirect construction, logs, or a model tool.
  */
-export function createOriginalLogin({ mode, container, run, fetcher = fetch }) {
+export function createOriginalLogin({ mode, container, nativePort = 0, run, fetcher = fetch }) {
   const targetRun = run || command;
   const passwordRun = run || credentialCommand;
   if (mode === 'docker' && (typeof container !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(container))) throw new Error('原版登录的容器名无效');
+  if (mode === 'native' && (!Number.isInteger(nativePort) || nativePort < 0 || nativePort > 65535)) throw new Error('原版登录的原生端口无效');
+  const native = mode === 'native' && nativePort !== 0;
   const lifetime = new AbortController();
   async function target({ signal } = {}) {
-    if (mode !== 'docker') return null;
+    if (mode !== 'docker' && !native) return null;
     const active = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     if (active.aborted) throw cancelled();
     let timer;
     try {
-      const commandTimeout = new AbortController();
-      timer = setTimeout(() => commandTimeout.abort(), 8000);
-      const commandSignal = AbortSignal.any([active, commandTimeout.signal]);
-      const output = await until(Promise.resolve().then(() => targetRun('docker', ['port', container, '6081/tcp'], { timeoutMs: 8000, signal: commandSignal })), commandSignal);
-      clearTimeout(timer);
-      const port = publishedPort(output);
+      let port = nativePort;
+      if (!native) {
+        const commandTimeout = new AbortController();
+        timer = setTimeout(() => commandTimeout.abort(), 8000);
+        const commandSignal = AbortSignal.any([active, commandTimeout.signal]);
+        const output = await until(Promise.resolve().then(() => targetRun('docker', ['port', container, '6081/tcp'], { timeoutMs: 8000, signal: commandSignal })), commandSignal);
+        clearTimeout(timer);
+        port = publishedPort(output);
+      }
       const probeTimeout = new AbortController();
       timer = setTimeout(() => probeTimeout.abort(), 4000);
       const probeSignal = AbortSignal.any([active, probeTimeout.signal]);
@@ -190,23 +195,27 @@ export function createOriginalLogin({ mode, container, run, fetcher = fetch }) {
   async function password({ signal } = {}) {
     const active = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     if (active.aborted) throw cancelled();
-    if (mode !== 'docker') throw passwordUnavailable();
+    if (mode !== 'docker' && !native) throw passwordUnavailable();
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), 8000);
     const commandSignal = AbortSignal.any([active, timeout.signal]);
     let environment, stored;
     try {
-      environment = await until(Promise.resolve().then(() => passwordRun('docker',
-        ['inspect', '--format', '{{json .Config.Env}}', container],
-        { timeoutMs: 8000, maxOutputBytes: MAX_ENV_BYTES, signal: commandSignal })), commandSignal);
-      const configured = effectivePassword(environment);
-      if (Buffer.isBuffer(environment)) environment.fill(0);
-      environment = null;
-      if (commandSignal.aborted) throw cancelled();
-      // Fixed path and bounded binary output only; no shell, host path, arbitrary
-      // file reader, environment dump, or remote service configuration is exposed.
-      stored = await until(Promise.resolve().then(() => passwordRun('docker',
-        ['exec', container, 'head', '-c', '8', '/root/.vnc/passwd'],
+      let configured = null;
+      if (!native) {
+        environment = await until(Promise.resolve().then(() => passwordRun('docker',
+          ['inspect', '--format', '{{json .Config.Env}}', container],
+          { timeoutMs: 8000, maxOutputBytes: MAX_ENV_BYTES, signal: commandSignal })), commandSignal);
+        configured = effectivePassword(environment);
+        if (Buffer.isBuffer(environment)) environment.fill(0);
+        environment = null;
+        if (commandSignal.aborted) throw cancelled();
+      }
+      // Only these fixed credential sources are supported. Native never reads an
+      // environment or a configurable file; both runners use bounded binary output
+      // without a shell, logging, service startup, or remote configuration.
+      stored = await until(Promise.resolve().then(() => passwordRun(native ? 'head' : 'docker',
+        native ? ['-c', '8', '/var/lib/snowluma/.vnc/passwd'] : ['exec', container, 'head', '-c', '8', '/root/.vnc/passwd'],
         { timeoutMs: 8000, maxOutputBytes: 8, signal: commandSignal })), commandSignal);
       if (commandSignal.aborted) throw cancelled();
       // Some original images generate the effective password file when the env
