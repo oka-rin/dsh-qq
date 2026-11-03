@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
       try {
         const r = await fetch(B + p, { ...init, cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         const data = await r.json();
-        if (!r.ok) return { ok: false, error: data?.error || `HTTP ${r.status}` };
+        if (!r.ok) return { ...data, ok: false, error: data?.error || data?.reason || `HTTP ${r.status}` };
         if (!data || typeof data !== 'object') return { ok: false, error: '接口未返回 JSON 对象' };
         if (data.result?.ok === false) return { ...data, ok: false, error: data.error || data.result.error || data.result.reason || '操作未完成' };
         return data;
@@ -86,6 +86,82 @@ window.__ModuleLoader__.load({
       setupSaved: 'Connection configuration saved. Upstream was not installed or started; Docker is unchanged.', setupRestart: 'Restart the QQ bot to apply. Review its state and restart manually in Operations.', setupNoRestart: 'The Host did not request a restart; verify actual connectivity.',
       setupOps: 'Go to Operations', setupConfirm: 'Recheck local OneBot and save this connection, preserving other settings? This does not start upstream software or migrate Docker.',
       setupBusy: 'Another configuration save is in progress. Please retry later.', setupEndpointError: 'Enter valid local HTTP / WebSocket URLs without credentials, query strings or fragments.', setupTokenError: 'A changed endpoint cannot reuse the old token. Enter a new token or explicitly choose no token.', setupNewTokenError: 'Enter a new token, or explicitly choose no token.', setupModelError: 'Model name and Base URL are required when configuring a model.', setupCheckFailed: 'Probe failed; configuration was not saved.', setupSaveFailed: 'Save success is unconfirmed. Refresh and check before submitting again.', setupError: 'Request failed',
+    });
+    Object.assign(copy.zh, {
+      setupIntro: '用可审查安装脚本准备宿主机原生 QQ 网关，手动启动后可在下方显示登录二维码，再单独检测 OneBot 连接；网页不会代执行管理员命令。',
+      setupManual: '先打开原生安装指南，下载审查脚本并预览计划；确认后由宿主管理员安装依赖、原版 SnowLuma 和 QQ。到「运维」手动启动网关后，可在下方获取当前登录二维码；协议确认、扫码与手机确认均需本人完成。',
+      setupConnect: '3 · 检测并保存本机连接',
+      loginTitle: '2 · QQ 扫码登录', loginIntro: '网关需已由你手动启动。点击按钮后才获取 QQ 当前登录二维码；请使用自己的手机 QQ 扫码，并亲自在手机上确认登录。此页不代接受上游协议、不自动启动服务，也不迁移 Docker。',
+      loginPrivate: '二维码是临时登录凭证，仅在本页内存显示，不提供保存、不对外分享。请勿截图转发或让他人扫码；离开页签后会清除。',
+      loginShow: '显示登录二维码', loginCapturing: '正在获取当前二维码…', loginRecapture: '重新读取当前二维码',
+      loginCheck: '检查 QQ 登录状态', loginChecking: '检查中…', loginRefresh: '请求更新二维码', loginRefreshing: '请求更新中…',
+      loginRefreshConfirm: '明确请求上游更新登录二维码？这不是重新截取当前二维码；若上游不支持，将显示失败原因，不会自动重试。',
+      loginHide: '隐藏二维码并停止检查', loginLoggedIn: 'QQ 已登录', loginWaiting: '等待扫码 / 手机确认', loginUnavailable: '登录状态不可用', loginUnknown: 'QQ 登录状态未确认',
+      loginFailed: '无法确认 QQ 登录状态，请检查网关并重试。', loginNoImage: '未取得可显示的 PNG 二维码，已清除旧图。请检查 QQ 登录窗口，再手动重新获取。',
+      loginAlt: 'QQ 当前登录二维码，请用本人手机 QQ 扫码并确认', loginScan: '请本人扫码并在手机上确认；此图可能过期。', loginCaptured: '截取时间',
+      loginPolling: '仅检查登录状态（每次完成后 5 秒），不会自动获取或更新二维码；登录成功后立即隐藏图片并停止检查。',
+      loginRecaptureNote: '重新获取只截取当前二维码，不保证是新码；更新二维码是另一个需确认的操作，上游可能不支持。',
+      loginRemoteRefresh: '当前未提供二维码更新能力。若二维码过期，请在宿主机远程桌面的 QQ 窗口手动刷新，再点「显示登录二维码」或「重新读取当前二维码」；重新截取不等于新码。',
+      loginSource: '状态来源', loginSeparate: 'QQ 已登录不等于 OneBot HTTP / WebSocket 已验收。请继续下方独立连接检测，成功后再保存接入配置。',
+    });
+    Object.assign(copy.en, {
+      setupIntro: 'Prepare the native QQ gateway with the reviewable host installer, start it manually, then display the login QR below and test OneBot separately. This page does not execute administrator commands.',
+      setupManual: 'Open the native guide, review the installer and preview its plan. A host administrator can install dependencies and original SnowLuma/QQ. Start the gateway manually in Operations, then obtain its current QR below. Agreements, scanning and phone confirmation remain yours to complete.',
+      setupConnect: '3 · Test & save a local connection',
+      loginTitle: '2 · QQ QR login', loginIntro: 'Start the gateway yourself first. Only clicking the button obtains QQ’s current login QR. Scan with your own mobile QQ and personally confirm login on your phone. This page never accepts upstream agreements, starts services or migrates Docker.',
+      loginPrivate: 'The QR is a temporary login credential, displayed only in this page’s memory, without save or external sharing controls. Do not screenshot, forward or let others scan it. Leaving this tab clears it.',
+      loginShow: 'Show login QR', loginCapturing: 'Obtaining current QR…', loginRecapture: 'Recapture current QR',
+      loginCheck: 'Check QQ login status', loginChecking: 'Checking…', loginRefresh: 'Request QR renewal', loginRefreshing: 'Requesting renewal…',
+      loginRefreshConfirm: 'Explicitly ask upstream to renew the login QR? This is not a recapture. Unsupported renewal will show the actual error and will not retry automatically.',
+      loginHide: 'Hide QR & stop checking', loginLoggedIn: 'QQ logged in', loginWaiting: 'Waiting for scan / phone confirmation', loginUnavailable: 'Login status unavailable', loginUnknown: 'QQ login not yet verified',
+      loginFailed: 'Could not verify QQ login. Check the gateway and retry.', loginNoImage: 'No displayable PNG QR was obtained; the old image was cleared. Check the QQ login window, then explicitly recapture.',
+      loginAlt: 'Current QQ login QR; scan and confirm with your own mobile QQ', loginScan: 'Scan and personally confirm on your phone. This image may expire.', loginCaptured: 'Captured at',
+      loginPolling: 'Checking status only, 5 seconds after each check finishes. No automatic QR capture or renewal. Successful login hides the image and stops checks.',
+      loginRecaptureNote: 'Recapture only obtains the current image, not necessarily a fresh code. QR renewal is a separate confirmed action and upstream may not support it.',
+      loginRemoteRefresh: 'QR renewal is not currently available. If the code expires, refresh it in QQ on the host’s remote desktop, then show or recapture it here. Recapture does not mean a fresh code.',
+      loginSource: 'Status source', loginSeparate: 'QQ login does not verify OneBot HTTP / WebSocket acceptance. Continue with the separate connection test below, then save the connection configuration.',
+    });
+    Object.assign(copy.zh, {
+      loginTitle: '2 · QQ 登录（扫码 / 实际 QQ 窗口）',
+      loginIntro: '网关需已由你手动启动。可显式获取当前二维码，用本人手机 QQ 扫码并确认；也可打开下方实际 QQ 登录窗口，是否提供账号密码入口取决于 QQ 客户端。网页不代接受协议、不自动启动服务、不迁移 Docker。',
+      loginLoggedIn: '已配置 OneBot 账号已登录',
+      loginSeparate: '上方登录状态可能来自当前已配置的 OneBot，并不证明下方 QQ 窗口是同一个实例。QQ 登录不等于拟接入端点的 HTTP / WebSocket 已验收；请继续独立连接检测，成功后再保存。',
+      loginRemoteRefresh: '当前未提供二维码自动更新能力。二维码过期时，请在下方实际 QQ 窗口或宿主机远程桌面中手动刷新，关闭嵌入窗口后再重新读取；重新截取不等于新码。',
+      desktopTitle: '实际 QQ 登录窗口', desktopOpen: '打开 QQ 登录窗口', desktopOpening: '正在打开 QQ 窗口…', desktopClose: '关闭登录窗口会话', desktopClosing: '正在关闭会话…',
+      desktopIntro: '这里连接宿主机上真实的 QQ 图形窗口，不是插件密码表单。账号密码、验证码、扫码确认和协议均请本人直接在 QQ 中操作；能否使用密码登录以 QQ 当前界面为准。需要已运行的 QQ，打开此窗口不会启动服务。',
+      desktopPrivate: '远程画面可能含账号或聊天隐私，仅本人在可信 HTTPS 或本机回环页面使用。请勿截图或分享。密码仅在浏览器、受信任宿主远程桌面通道与 QQ 之间传输，不填写到插件、模型或工具；此处没有剪贴板同步或文件传输控件。离开页签会关闭会话，服务端还会限时失效。',
+      desktopHelp: '点击画面后由本人操作；嵌入窗口打开时暂停二维码获取。关闭会话不等于退出 QQ，QQ 登录后仍需检查下方连接。',
+      desktopExpires: '会话到期', desktopExpired: '登录窗口会话已到期，请按需手动重新打开。',
+      desktopFailed: '无法打开实际 QQ 窗口，请检查已运行的原生 QQ 与远程桌面依赖。', desktopInvalid: '宿主未返回有效的同源登录窗口地址与到期时间，未打开画面。',
+      desktopCloseFailed: '会话关闭未确认，请点击关闭重试；不要认为服务端已释放，会话也会按服务端期限失效。',
+      desktopFrameFailed: '登录窗口加载失败，已隐藏画面并请求关闭会话。',
+    });
+    Object.assign(copy.en, {
+      loginTitle: '2 · QQ login (QR / actual QQ window)',
+      loginIntro: 'Start the gateway manually first. Explicitly obtain the QR and scan/confirm with your own mobile QQ, or open the actual QQ window below. Password login depends on the QQ client. This page never accepts agreements, starts services or migrates Docker.',
+      loginLoggedIn: 'Configured OneBot account logged in',
+      loginSeparate: 'The status above may come from the configured OneBot, not the same QQ instance as the window below. QQ login does not verify HTTP / WebSocket acceptance for the intended endpoint. Test that connection separately before saving.',
+      loginRemoteRefresh: 'Automatic QR renewal is unavailable. Refresh expired codes in the actual QQ window below or the host remote desktop, close the embedded session, then recapture. Recapture is not renewal.',
+      desktopTitle: 'Actual QQ login window', desktopOpen: 'Open QQ login window', desktopOpening: 'Opening QQ window…', desktopClose: 'Close login window session', desktopClosing: 'Closing session…',
+      desktopIntro: 'This connects to the real QQ graphical window on the host, not a plugin password form. Personally enter account/password, solve verification and review agreements inside QQ. Password login availability depends on its current interface. QQ must already be running; opening this viewer does not start services.',
+      desktopPrivate: 'The remote view may contain account or chat information. Use it privately over trusted HTTPS or local loopback. Do not screenshot or share it. Password input travels only between your browser, the trusted host desktop channel and QQ, not plugin fields, models or tools. No clipboard-sync or file-transfer controls are provided here. Leaving this tab closes the session; the server also enforces expiry.',
+      desktopHelp: 'Click the view to interact personally. QR acquisition is paused while the viewer is open. Closing the session does not log out QQ; test the connection below after login.',
+      desktopExpires: 'Session expires', desktopExpired: 'The login window session expired. Reopen explicitly if needed.',
+      desktopFailed: 'Could not open QQ. Check the running native QQ client and remote-desktop dependencies.', desktopInvalid: 'The Host did not return a valid same-origin login-window path and expiry; no view was opened.',
+      desktopCloseFailed: 'Session closure is unconfirmed. Click Close to retry; do not assume the server released it. The server expiry still applies.',
+      desktopFrameFailed: 'The login window failed to load. The view was hidden and session closure requested.',
+    });
+    Object.assign(copy.zh, {
+      loginQrCaptured: '已读取二维码 · 有效性未确认',
+      loginExpiryUnknown: '仅识别并截取了 QQ 窗口中的二维码，无法确认是否仍有效，也不能据此判断已扫码或手机已确认。',
+      loginSelectedUnverified: '当前已配置网关在线，不代表所选 QQ 窗口已登录。若正在迁移，可继续读取所选窗口二维码或打开实际 QQ 窗口。',
+      loginPolling: '仅检查状态（每次完成后 5 秒），不会自动读取或更新二维码。检测到已配置网关登录时会清除图片并停止检查；这不能证明所选窗口登录成功，仍可手动重新读取。',
+    });
+    Object.assign(copy.en, {
+      loginQrCaptured: 'QR captured · validity unverified',
+      loginExpiryUnknown: 'A QR was recognized and cropped from the QQ window. Its validity, scan progress and phone confirmation cannot be verified from this image.',
+      loginSelectedUnverified: 'The configured gateway is online; this does not verify login in the selected QQ window. During migration, you can still capture its QR or open the actual QQ window.',
+      loginPolling: 'Checking status only, 5 seconds after each check finishes; no automatic capture or renewal. Detecting configured-gateway login clears the image and stops checks, but does not verify the selected window. You can explicitly recapture.',
     });
     let tr = (key) => copy.zh[key] || key;
 
@@ -721,8 +797,197 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // Session writes are serialized across mounts: a stale close must not revoke a newer viewer.
+    let desktopWrites = Promise.resolve();
+    const desktopWrite = (work) => {
+      const result = desktopWrites.then(work, work);
+      desktopWrites = result.catch(() => {});
+      return result;
+    };
+    function QQDesktopPanel({ onOpening, onActive, disabled }) {
+      const [viewer, setViewer] = React.useState(null);
+      const [busy, setBusy] = React.useState('');
+      const [message, setMessage] = React.useState('');
+      const mounted = React.useRef(false);
+      const epoch = React.useRef(0);
+      const lock = React.useRef(false);
+      const requested = React.useRef(false);
+      const expiration = React.useRef(null);
+      const reason = (result) => String(result?.reason || result?.error || tr('desktopFailed')).slice(0, 700);
+      const release = () => desktopWrite(() => post('/login/desktop/close', {}));
+      React.useEffect(() => {
+        mounted.current = true; epoch.current += 1;
+        return () => {
+          mounted.current = false; epoch.current += 1;
+          clearTimeout(expiration.current);
+          if (requested.current) { requested.current = false; release(); }
+        };
+      }, []);
+      const close = async (note = '') => {
+        if (lock.current) return;
+        const version = epoch.current;
+        lock.current = true; clearTimeout(expiration.current);
+        setViewer(null); setBusy('close'); setMessage(note);
+        const result = await release();
+        if (!mounted.current || epoch.current !== version) return;
+        lock.current = false; setBusy('');
+        if (result?.ok) { requested.current = false; onActive(false); }
+        else setMessage(`${note ? note + ' ' : ''}${tr('desktopCloseFailed')} ${reason(result)}`);
+      };
+      const open = async () => {
+        if (disabled || lock.current || requested.current || onOpening() === false) return;
+        const version = epoch.current;
+        lock.current = true; requested.current = true;
+        onActive(true);
+        setViewer(null); setMessage(''); setBusy('open');
+        const result = await desktopWrite(() => mounted.current && epoch.current === version
+          ? post('/login/desktop/session', {}) : null);
+        if (!mounted.current || epoch.current !== version) return;
+        const expires = typeof result?.expiresAt === 'number' ? result.expiresAt : Date.parse(result?.expiresAt);
+        if (!result?.ok || result.url !== '/dsh-qq/login/desktop/view' || !Number.isFinite(expires) || expires <= Date.now()) {
+          // Even a malformed success may have created a remote session; release it explicitly.
+          const cleanup = await release();
+          if (!mounted.current || epoch.current !== version) return;
+          requested.current = !cleanup?.ok;
+          lock.current = false; setBusy(''); onActive(requested.current);
+          setMessage(`${result?.ok ? tr('desktopInvalid') : reason(result)}${cleanup?.ok ? '' : ' ' + tr('desktopCloseFailed')}`);
+          return;
+        }
+        setViewer({ url: basePath + result.url, expires });
+        lock.current = false; setBusy('');
+        const expire = () => {
+          if (!mounted.current || epoch.current !== version) return;
+          if (Date.now() < expires) { expiration.current = setTimeout(expire, Math.min(expires - Date.now(), 2147483647)); return; }
+          close(tr('desktopExpired'));
+        };
+        expiration.current = setTimeout(expire, Math.min(expires - Date.now(), 2147483647));
+      };
+      return h('div', { style: { ...S.pickBox, marginTop: 14 }, 'aria-busy': Boolean(busy) },
+        h('h3', { style: { fontSize: 13, margin: '0 0 8px' } }, tr('desktopTitle')),
+        h('p', { style: S.dim }, tr('desktopIntro')),
+        h('p', { style: { ...S.dim, color: T.warn } }, tr('desktopPrivate')),
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h('button', { type: 'button', style: S.btn(false), disabled: disabled || Boolean(busy) || requested.current,
+            onClick: open }, tr(busy === 'open' ? 'desktopOpening' : 'desktopOpen')),
+          viewer || requested.current ? h('button', { type: 'button', style: S.btn(false), disabled: Boolean(busy),
+            onClick: () => close() }, tr(busy === 'close' ? 'desktopClosing' : 'desktopClose')) : null),
+        message ? h('p', { role: 'alert', style: { color: T.warn, overflowWrap: 'anywhere' } }, message) : null,
+        viewer ? h(React.Fragment, null,
+          h('p', { style: S.dim }, `${tr('desktopExpires')}: ${new Date(viewer.expires).toLocaleString()} · ${tr('desktopHelp')}`),
+          h('iframe', { src: viewer.url, title: tr('desktopTitle'), referrerPolicy: 'no-referrer',
+            allow: "clipboard-read 'none'; clipboard-write 'none'; camera 'none'; microphone 'none'; display-capture 'none'",
+            onError: () => close(tr('desktopFrameFailed')),
+            style: { display: 'block', width: '100%', height: 'min(70vh, 640px)', minHeight: 360,
+              border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, marginTop: 10, background: 'var(--dsw-alias-bg-layer-1)' } })) : null);
+    }
+
+    // QR images are login credentials: explicit acquisition only, in-memory, never persisted.
+    function LoginPanel({ onOps }) {
+      const [status, setStatus] = React.useState(null);
+      const [qr, setQr] = React.useState(null);
+      const [desktopActive, setDesktopActive] = React.useState(false);
+      const desktopLock = React.useRef(false);
+      const [busy, setBusy] = React.useState('');
+      const [error, setError] = React.useState('');
+      const life = React.useRef(0);
+      const mounted = React.useRef(false);
+      const lock = React.useRef(null);
+      const timer = React.useRef(null);
+      const polling = React.useRef(false);
+      const stop = () => { polling.current = false; clearTimeout(timer.current); timer.current = null; };
+      const detail = (value) => String(value || '').replace(/data:image\/[^\s]+/gi, '[private image]').slice(0, 700);
+      const accept = (result, imageRequest) => {
+        if (!result?.ok || !['logged_in', 'waiting_scan', 'qr_captured', 'unavailable'].includes(result.state)) {
+          setQr(null); stop();
+          setStatus({ state: 'unavailable', canRefresh: result?.canRefresh === true });
+          setError(detail(result?.reason || result?.error) || tr('loginFailed'));
+          return;
+        }
+        setStatus({ state: result.state, account: result.account, reason: detail(result.reason),
+          source: detail(result.source), canRefresh: result.canRefresh === true,
+          expiryUnknown: result.expiryUnknown === true, selectedClientVerified: result.selectedClientVerified === true });
+        setError('');
+        if (!['waiting_scan', 'qr_captured'].includes(result.state)) {
+          setQr(null); stop();
+          return;
+        }
+        if (imageRequest) {
+          // Reject remote URLs and SVG; the browser must not send a credential to another origin.
+          if (typeof result.image !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(result.image)) {
+            setQr(null); stop(); setError(tr('loginNoImage')); return;
+          }
+          setQr({ image: result.image, capturedAt: result.capturedAt, expiryUnknown: result.expiryUnknown === true });
+          polling.current = true;
+        }
+      };
+      const run = async (kind, epoch = life.current, automatic = false) => {
+        if (!mounted.current || life.current !== epoch || lock.current) return;
+        const ticket = {};
+        lock.current = ticket;
+        clearTimeout(timer.current); timer.current = null;
+        setBusy(kind);
+        if (kind !== 'status') { setQr(null); setError(''); }
+        const result = kind === 'status' ? await get('/login/status')
+          : await post(kind === 'refresh' ? '/login/refresh' : '/login/qr', kind === 'refresh' ? { confirm: true } : {});
+        if (lock.current === ticket) lock.current = null;
+        if (!mounted.current || epoch !== life.current) return;
+        setBusy('');
+        // An image decode failure or explicit hide can stop an in-flight automatic check.
+        if (automatic && !polling.current) return;
+        accept(result, kind !== 'status');
+        if (polling.current) timer.current = setTimeout(() => run('status', epoch, true), 5000);
+      };
+      React.useEffect(() => {
+        const epoch = ++life.current;
+        mounted.current = true;
+        // This read never captures a QR, refreshes it, accepts terms, or starts upstream.
+        // Defer the mount read so StrictMode's discarded effect cannot overlap a new read.
+        timer.current = setTimeout(() => run('status', epoch), 0);
+        return () => { mounted.current = false; life.current += 1; lock.current = null; stop(); };
+      }, []);
+      const capture = () => { if (!lock.current && !desktopLock.current) run('qr'); };
+      const refresh = () => {
+        if (lock.current || desktopLock.current || status?.canRefresh !== true || !window.confirm(tr('loginRefreshConfirm'))) return;
+        run('refresh');
+      };
+      const hide = () => { stop(); setQr(null); };
+      const imageFailed = () => { stop(); setQr(null); setError(tr('loginNoImage')); };
+      const loggedIn = status?.state === 'logged_in';
+      const stateLabel = loggedIn ? 'loginLoggedIn' : status?.state === 'qr_captured' ? 'loginQrCaptured' : status?.state === 'waiting_scan' ? 'loginWaiting'
+        : status?.state === 'unavailable' ? 'loginUnavailable' : 'loginUnknown';
+      const captured = qr?.capturedAt ? new Date(qr.capturedAt) : null;
+      return h('section', { style: S.card, 'aria-label': tr('loginTitle'), 'aria-busy': Boolean(busy) },
+        h('div', { style: S.h2row }, h('h2', { style: S.h2inner }, tr('loginTitle')),
+          h('span', { role: 'status', style: S.pill(loggedIn ? 'ok' : '') }, tr(stateLabel))),
+        h('p', null, tr('loginIntro')),
+        h('p', { style: { ...S.pickBox, color: T.warn } }, tr('loginPrivate')),
+        loggedIn ? h('p', { role: 'status', style: { color: T.success, overflowWrap: 'anywhere' } }, tr('loginLoggedIn'),
+          status.account?.user_id ? ` · ${detail(status.account.nickname)} (${detail(status.account.user_id)})` : '') : null,
+        status?.reason ? h('p', { style: { color: T.warn, overflowWrap: 'anywhere' } }, status.reason) : null,
+        error ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, error) : null,
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 } },
+          h('button', { type: 'button', style: S.btn(true), disabled: Boolean(busy) || desktopActive, onClick: capture }, tr(busy === 'qr' ? 'loginCapturing' : qr ? 'loginRecapture' : 'loginShow')),
+          h('button', { type: 'button', style: S.btn(false), disabled: Boolean(busy), onClick: () => run('status') }, tr(busy === 'status' ? 'loginChecking' : 'loginCheck')),
+          !loggedIn && status?.canRefresh === true ? h('button', { type: 'button', style: S.btn(false), disabled: Boolean(busy) || desktopActive, onClick: refresh }, tr(busy === 'refresh' ? 'loginRefreshing' : 'loginRefresh')) : null,
+          qr ? h('button', { type: 'button', style: S.btn(false), disabled: Boolean(busy), onClick: hide }, tr('loginHide')) : null,
+          h('button', { type: 'button', style: S.btn(false), onClick: onOps }, tr('setupOps'))),
+        qr && !loggedIn ? h('figure', { style: { margin: '16px 0', width: '100%', maxWidth: 320 } },
+          h('img', { src: qr.image, alt: tr('loginAlt'), referrerPolicy: 'no-referrer', draggable: false,
+            onError: imageFailed, style: { display: 'block', width: '100%', maxWidth: 320, height: 'auto', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)' } }),
+          h('figcaption', { style: { ...S.dim, marginTop: 8 } }, tr('loginScan'),
+            captured && Number.isFinite(captured.getTime()) ? ` · ${tr('loginCaptured')}: ${captured.toLocaleString()}` : '')) : null,
+        qr ? h('p', { style: S.dim }, tr('loginPolling')) : null,
+        h('p', { style: S.dim }, tr(status?.canRefresh === true ? 'loginRecaptureNote' : 'loginRemoteRefresh')),
+        qr?.expiryUnknown ? h('p', { style: { ...S.dim, color: T.warn } }, tr('loginExpiryUnknown')) : null,
+        loggedIn && !status.selectedClientVerified ? h('p', { style: { ...S.dim, color: T.warn } }, tr('loginSelectedUnverified')) : null,
+        status?.source ? h('p', { style: S.dim }, `${tr('loginSource')}: ${status.source}`) : null,
+        h('p', { style: S.dim }, tr('loginSeparate')),
+        h(QQDesktopPanel, { disabled: Boolean(busy), onOpening: () => { if (lock.current) return false; stop(); setQr(null); return true; },
+          onActive: (active) => { desktopLock.current = active; setDesktopActive(active); } }));
+    }
+
     // Native setup only probes and saves local connection settings; it never deploys upstream.
-    function SetupPanel({ onOps, onSaved }) {
+    function SetupPanel({ onOps, onSaved, active }) {
       const { live } = useLifetime();
       const [info, setInfo] = React.useState(null);
       const [loading, setLoading] = React.useState(true);
@@ -872,6 +1137,7 @@ window.__ModuleLoader__.load({
           h('p', { style: { color: T.warn } }, tr('setupEula')),
           h('div', { style: S.dim }, tr('setupAuto'), info?.automaticInstall?.reason ? ` · ${safeText(info.automaticInstall.reason)}` : ''),
           info?.native?.service ? h('p', { style: { ...S.dim, overflowWrap: 'anywhere' } }, `${tr('setupService')}: ${safeText(info.native.service)} · ${tr(info.native.scope === 'system' ? 'setupSystemScope' : 'setupUserScope')}`) : null),
+        active ? h(LoginPanel, { onOps }) : null,
         h('section', { style: S.card, 'aria-label': tr('setupConnect') },
           h('h2', { style: S.h2 }, tr('setupConnect')),
           h('p', { style: S.dim }, tr('setupLocal')),
@@ -1877,7 +2143,7 @@ window.__ModuleLoader__.load({
         h('style', null, `.qq-panel *{box-sizing:border-box}.qq-panel button,.qq-panel input,.qq-panel select,.qq-panel textarea{accent-color:var(--dsw-alias-state-business-primary)}.qq-panel button:disabled{opacity:.5;cursor:not-allowed}.qq-panel button:focus-visible,.qq-panel input:focus-visible,.qq-panel textarea:focus-visible,.qq-panel select:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.qq-tabs{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);margin-bottom:16px;overflow:auto}.qq-tab{font:inherit;white-space:nowrap;padding:9px 12px;border:0;border-bottom:2px solid transparent;color:var(--dsw-alias-label-secondary);background:transparent;cursor:pointer}.qq-tab[aria-selected=true]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.qq-tab:hover{background:var(--dsw-alias-interactive-bg-hover)}.qq-panel [hidden]{display:none!important}.qq-panel table{max-width:100%}.qq-panel select,.qq-panel option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}@media(max-width:600px){.qq-chat-list{max-height:180px!important}.qq-panel td,.qq-panel th{overflow-wrap:anywhere}}`),
         条,
         h('div', { role: 'tabpanel', id: `${tabId}-setup-panel`, 'aria-labelledby': `${tabId}-setup`, hidden: 页 !== 'setup', tabIndex: 0 },
-          h(SetupPanel, { onOps: () => 设页('ops'), onSaved: () => 拉() })),
+          h(SetupPanel, { onOps: () => 设页('ops'), onSaved: () => 拉(), active: 页 === 'setup' })),
         ...页签.filter(([key]) => key === 'chats' || key === 'ops').map(([key]) => h('div', { key, role: 'tabpanel', id: `${tabId}-${key}-panel`, 'aria-labelledby': `${tabId}-${key}`, hidden: 页 !== key, tabIndex: 0 },
           key === 'chats' ? (页 === key ? h(ChatsPanel, { scopes, groups, online }) : null)
           : key === 'ops' ? (页 === key ? h(OpsPanel) : null) : null)),

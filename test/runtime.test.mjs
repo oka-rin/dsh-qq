@@ -22,7 +22,7 @@ test('native tools preserve nested required schemas, JSON requests and failures'
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const ctx = {
     effect(fn) { const d = fn(); if (d) disposers.push(d); }, logger: { info() {} },
-    webServer: { register(r) { routes.set(r.path, r.handler); return () => routes.delete(r.path); } },
+    webServer: { registerUpgrade() { return () => {}; }, register(r) { routes.set(r.path, r.handler); return () => routes.delete(r.path); } },
     tools: { register(t) { tools.set(t.name, t); return () => tools.delete(t.name); } },
   };
   try {
@@ -51,7 +51,7 @@ test('first-run setup works without a backend and model listing respects disable
   const calls = [];
   globalThis.fetch = async (url, init) => { calls.push({ url, init }); return new Response(JSON.stringify({ data: [{ id: 'test-model' }] })); };
   process.env.DEEPSEEK_API_KEY = 'must-not-leak';
-  const ctx = { effect(fn) { const d = fn(); if (d) disposers.push(d); }, logger: { info() {} }, webServer: { register(r) { routes.set(r.path, r.handler); return () => routes.delete(r.path); } }, tools: { register() { return () => {}; } } };
+  const ctx = { effect(fn) { const d = fn(); if (d) disposers.push(d); }, logger: { info() {} }, webServer: { registerUpgrade() { return () => {}; }, register(r) { routes.set(r.path, r.handler); return () => routes.delete(r.path); } }, tools: { register() { return () => {}; } } };
   t.after(() => { for (const d of disposers.reverse()) d(); globalThis.fetch = originalFetch; if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY; else process.env.DEEPSEEK_API_KEY = originalKey; fs.rmSync(root, { recursive: true, force: true }); });
   const live = apply(ctx, { dataDir: root, manageBot: false }); await live.ready;
   const invoke = async route => { let body; await routes.get(route)({ url: route, method: 'GET' }, { writeHead() {}, end(s) { body = JSON.parse(s); } }); return body; };

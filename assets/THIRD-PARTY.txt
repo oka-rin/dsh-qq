@@ -1,0 +1,6 @@
+desktop-viewer.js contains unmodified noVNC 1.5.0 library sources bundled with the MIT-licensed dsh-qq desktop-client.js entry.
+noVNC copyright (C) 2018 The noVNC authors; licensed under MPL-2.0, with bundled third-party notices retained in licenses/ and generated bundle comments. These components are NOT relicensed under dsh-qq's MIT license.
+Corresponding noVNC source: https://github.com/novnc/noVNC/tree/v1.5.0
+Exact npm source package: https://registry.npmjs.org/@novnc/novnc/-/novnc-1.5.0.tgz
+Reproduce using package-lock.json, npm ci, then npm run build:desktop.
+The plugin does not bundle or relicense QQ, SnowLuma, x11vnc or system packages.

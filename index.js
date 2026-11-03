@@ -14,6 +14,9 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { createBotManager, command } from './runtime.js';
 import { createSetup, nativeStatus, nativeServiceArgs } from './setup.js';
+import { createLogin } from './login.js';
+import { createDesktop } from './desktop.js';
+import { registerLoginHttp } from './login-http.js';
 import { fileURLToPath } from 'node:url';
 
 import Schema from '@deepseek-ai/schemastery';
@@ -36,6 +39,8 @@ const DEFAULTS = {
   snowLumaMode: 'native',
   snowLumaService: 'snowluma.target',
   snowLumaServiceScope: 'system',
+  snowLumaDisplay: ':99',
+  snowLumaXauthority: '/var/lib/snowluma/.Xauthority',
 };
 
 function readJson(file, fallback = null) {
@@ -120,10 +125,12 @@ export const Config = Schema.object({
   snowLumaServiceScope: Schema.union(['system', 'user']).default('system').description('原生 systemd 服务范围'),
   snowLumaComposeFile: Schema.string().default('').description('兼容模式：SnowLuma compose 文件绝对路径；不会自动启动网关'),
   snowLumaContainer: Schema.string().default('snowluma').description('用于查看状态及启停的 Docker 容器名称'),
+  snowLumaDisplay: Schema.string().default(':99').description('原生 QQ 本机 X11 显示编号；扫码仅读取核实归属的 QQ 窗口'),
+  snowLumaXauthority: Schema.string().default('/var/lib/snowluma/.Xauthority').description('原生 QQ Xauthority 绝对路径；文件缺失时拒绝访问，仅无认证的旧专用显示可显式留空'),
 });
 
 export const name = 'dsh-qq';
-export const inject = ['webServer', 'tools'];
+export const inject = ['webServer', 'tools', 'connection'];
 
 export function apply(ctx, config = {}) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
@@ -561,6 +568,13 @@ export function apply(ctx, config = {}) {
   });
 
   const setup = createSetup({ configPath, nativeService: cfg.snowLumaService, nativeScope: cfg.snowLumaServiceScope });
+  const windowOptions = { mode: cfg.snowLumaMode, container: cfg.snowLumaContainer,
+    display: cfg.snowLumaMode === 'docker' ? ':1' : cfg.snowLumaDisplay,
+    xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };
+  const login = createLogin({ ...windowOptions, check: () => setup.check() });
+  const desktop = createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
+  const loginHttp = registerLoginHttp({ ctx, login, desktop, readBody,
+    assetPath: path.join(PKG_DIR, 'assets/desktop-viewer.js') });
   const setupAction = async (action, input = {}) => {
     ensureDataDir();
     if (action === 'status') return setup.status();
@@ -660,6 +674,7 @@ export function apply(ctx, config = {}) {
   }
 
   ctx.effect(() => () => {
+    loginHttp.dispose();
     for (const stream of streams) stream.abort();
     stopBot();
   });

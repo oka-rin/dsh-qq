@@ -105,7 +105,7 @@ done
 ! getent passwd snowluma >/dev/null || fail 'snowluma account already exists; manual migration/review required'
 ! getent group snowluma >/dev/null || fail 'snowluma group already exists; manual migration/review required'
 [[ ! -e /tmp/.X99-lock && ! -S /tmp/.X11-unix/X99 ]] || fail 'X display :99 already in use; review manually'
-packages=(python3 ca-certificates curl passwd ffmpeg xvfb xauth fluxbox dbus-x11 libnss3 libnspr4 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libgtk-3-0 fonts-noto-cjk)
+packages=(python3 ca-certificates curl passwd ffmpeg xvfb xauth x11-utils x11vnc fluxbox dbus-x11 libnss3 libnspr4 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libgtk-3-0 fonts-noto-cjk)
 # Debian 13 / Ubuntu 24.04 rename several libraries for time_t64. Resolve only
 # from the already configured apt repositories; no third-party repo is added.
 for i in "${!packages[@]}"; do

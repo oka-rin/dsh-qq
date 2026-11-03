@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "QQ bot integration for DeepSeek Harness: bundled bot, SnowLuma/OneBot connection, control panel and QQ tools. SnowLuma itself is external.",
   "type": "module",
   "license": "MIT",
@@ -20,6 +20,8 @@
     "client.js",
     "runtime.js",
     "setup.js",
+    "login.js",
+    "desktop.js",
     "deploy/*.yml",
     "cordis.patch.yml",
     "bot/src/*.mjs",
@@ -35,14 +37,20 @@
     "README.md",
     "docs/advanced.md",
     "docs/native.md",
-    "LICENSE"
+    "LICENSE",
+    "login-worker.js",
+    "login-http.js",
+    "desktop-client.js",
+    "assets/*",
+    "assets/licenses/*"
   ],
   "scripts": {
     "test": "node scripts/test.mjs",
     "test:release": "node --test test/*.test.mjs",
     "check:release": "node scripts/check-release.mjs",
     "pack:check": "npm run check:release",
-    "prepack": "npm run check:release"
+    "prepack": "npm run check:release",
+    "build:desktop": "node scripts/build-desktop.mjs"
   },
   "dsh": {
     "bundle": {
@@ -50,13 +58,34 @@
     },
     "client": {
       "platform": "web",
-      "inject": ["slots", "locale"],
-      "external": ["react"]
+      "inject": [
+        "slots",
+        "locale"
+      ],
+      "external": [
+        "react"
+      ]
     }
   },
   "dependencies": {
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.5"
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "@novnc/novnc": "1.5.0",
+    "jsqr": "1.4.0",
+    "pngjs": "7.0.0",
+    "qrcode": "1.5.4",
+    "ws": "8.18.3"
   },
-  "keywords": ["dsh-plugin", "deepseek-harness", "qq", "qqbot", "snowluma", "onebot", "chatbot"]
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "qq",
+    "qqbot",
+    "snowluma",
+    "onebot",
+    "chatbot"
+  ],
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
 }
