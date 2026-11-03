@@ -32,6 +32,7 @@
     "test/*.test.mjs",
     "icon.svg",
     "README.md",
+    "docs/advanced.md",
     "LICENSE"
   ],
   "scripts": {

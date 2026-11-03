@@ -15,6 +15,7 @@ if (fs.existsSync(path.join(root, 'package-lock.json'))) {
   assert.equal(lock.packages[''].version, manifest.version, 'Lockfile root and plugin versions must match');
 }
 assert.ok(manifest.files.includes('setup.js'), 'Setup module must be explicitly allowlisted');
+assert.ok(manifest.files.includes('docs/advanced.md'), 'Advanced documentation must be explicitly allowlisted');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const result = spawnSync(npm, ['pack', '--dry-run', '--json', '--ignore-scripts'], {
   cwd: root,
@@ -24,10 +25,10 @@ const result = spawnSync(npm, ['pack', '--dry-run', '--json', '--ignore-scripts'
 assert.equal(result.status, 0, 'npm pack --dry-run failed; inspect npm diagnostics locally');
 const [pack] = JSON.parse(result.stdout);
 const files = pack.files.map((entry) => entry.path);
-const allowed = /^(?:package\.json|README\.md|LICENSE|icon\.svg|index\.js|client\.js|runtime\.js|setup\.js|deploy\/snowluma\.compose\.yml|cordis\.patch\.yml|locale\/(?:en|zh)\.json|bot\/(?:package\.json|config\.example\.json|snowluma-api-catalog\.json|src\/[^/]+\.mjs|test\/[^/]+\.test\.mjs)|scripts\/[^/]+\.mjs|test\/[^/]+\.test\.mjs)$/;
+const allowed = /^(?:package\.json|README\.md|docs\/advanced\.md|LICENSE|icon\.svg|index\.js|client\.js|runtime\.js|setup\.js|deploy\/snowluma\.compose\.yml|cordis\.patch\.yml|locale\/(?:en|zh)\.json|bot\/(?:package\.json|config\.example\.json|snowluma-api-catalog\.json|src\/[^/]+\.mjs|test\/[^/]+\.test\.mjs)|scripts\/[^/]+\.mjs|test\/[^/]+\.test\.mjs)$/;
 assert.deepEqual(files.filter((file) => !allowed.test(file)), [], 'Unexpected files in npm distribution');
 for (const required of [
-  'index.js', 'client.js', 'runtime.js', 'setup.js', 'deploy/snowluma.compose.yml', 'cordis.patch.yml', 'icon.svg', 'locale/en.json', 'locale/zh.json',
+  'index.js', 'client.js', 'runtime.js', 'setup.js', 'docs/advanced.md', 'deploy/snowluma.compose.yml', 'cordis.patch.yml', 'icon.svg', 'locale/en.json', 'locale/zh.json',
   'bot/config.example.json', 'bot/package.json', 'bot/snowluma-api-catalog.json',
   'bot/src/index.mjs', 'bot/src/tools.mjs', 'bot/test/schema.test.mjs',
   'scripts/test.mjs', 'scripts/check-release.mjs', 'test/release.test.mjs',
