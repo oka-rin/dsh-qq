@@ -19,6 +19,10 @@ import { createDesktop } from './desktop.js';
 import { registerLoginHttp } from './login-http.js';
 import { createOriginalLogin, originalRedirect } from './original-login.js';
 import { createNapcatLogin, NAPCAT_WEBUI_CONFIG } from './napcat-login.js';
+import { createDeployment, readDeploymentSelection } from './deployment.js';
+import { registerDeploymentHttp } from './deploy-http.js';
+import { dockerEndpoint } from './scripts/install-snowluma-docker.mjs';
+import { dockerExecutable } from './docker-prerequisites.js';
 import { fileURLToPath } from 'node:url';
 
 import Schema from '@deepseek-ai/schemastery';
@@ -149,6 +153,9 @@ export function apply(ctx, config = {}) {
   const dataDir = path.resolve(cfg.dataDir || path.join(defaultDshHome(), 'storage', 'dsh-qq'));
   const botDir = path.resolve(cfg.botDir || path.join(PKG_DIR, 'bot'));
   const configPath = path.join(dataDir, 'config.json');
+  // Persist the user's browser deployment selection outside package/profile code.
+  const savedDeployment = readDeploymentSelection(path.join(dataDir, 'gateway-deployment.json'));
+  if (savedDeployment) Object.assign(cfg, { gatewayBackend: savedDeployment.backend, snowLumaMode: savedDeployment.mode, snowLumaContainer: savedDeployment.container });
   const storageDir = () => path.resolve(dataDir, readBotConfig().storage?.dataDir || 'data');
   const historyDir = () => path.join(storageDir(), 'history');
   const memoryDir = () => path.join(storageDir(), 'memory');
@@ -580,21 +587,37 @@ export function apply(ctx, config = {}) {
   });
 
   if (!['snowluma', 'napcat'].includes(cfg.gatewayBackend)) throw new Error('不支持的网关后端');
-  const napcat = cfg.gatewayBackend === 'napcat';
-  const setup = createSetup({ configPath, gatewayBackend: cfg.gatewayBackend, gatewayMode: napcat ? 'native' : cfg.snowLumaMode, nativeService: napcat ? cfg.napcatService : cfg.snowLumaService, nativeScope: napcat ? 'system' : cfg.snowLumaServiceScope });
-  const windowOptions = { mode: cfg.snowLumaMode, container: cfg.snowLumaContainer,
-    display: cfg.snowLumaMode === 'docker' ? ':1' : cfg.snowLumaDisplay,
-    xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };
-  const login = napcat ? { async status() {
-    try { const result = await setup.check(); return { ok: true, state: 'logged_in', backend: 'napcat', account: result.account }; }
-    catch { return { ok: true, state: 'unavailable', backend: 'napcat', reason: '尚未验证 OneBot HTTP / WebSocket 连接；请在 NapCat 官方 WebUI 确认登录，再检测 OneBot 配置' }; }
-  }, dispose() {} } : createLogin({ ...windowOptions, check: () => setup.check() });
-  const desktop = napcat ? { stop() {}, dispose() {} } : createDesktop({ ...windowOptions, discoverWindow: () => login.window() });
-  const original = napcat ? null : createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer, nativePort: cfg.snowLumaDesktopPort });
+  let napcat, setup, loginBackend, desktopBackend, original, napcatLogin;
+  function rebuildGateway() {
+    loginBackend?.dispose(); desktopBackend?.dispose(); original?.dispose(); napcatLogin?.dispose();
+    napcat = cfg.gatewayBackend === 'napcat';
+    setup = createSetup({ configPath, gatewayBackend: cfg.gatewayBackend, gatewayMode: napcat ? 'native' : cfg.snowLumaMode, nativeService: napcat ? cfg.napcatService : cfg.snowLumaService, nativeScope: napcat ? 'system' : cfg.snowLumaServiceScope });
+    const windowOptions = { mode: cfg.snowLumaMode, container: cfg.snowLumaContainer,
+      display: cfg.snowLumaMode === 'docker' ? ':1' : cfg.snowLumaDisplay,
+      xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };
+    loginBackend = napcat ? { async status() {
+      try { const result = await setup.check(); return { ok: true, state: 'logged_in', backend: 'napcat', account: result.account }; }
+      catch { return { ok: true, state: 'unavailable', backend: 'napcat', reason: '尚未验证 OneBot HTTP / WebSocket 连接；请在 NapCat 官方 WebUI 确认登录，再检测 OneBot 配置' }; }
+    }, dispose() {} } : createLogin({ ...windowOptions, check: () => setup.check() });
+    desktopBackend = napcat ? { stop() {}, dispose() {} } : createDesktop({ ...windowOptions, discoverWindow: () => loginBackend.window() });
+    original = !napcat && (cfg.snowLumaMode === 'docker' || (cfg.snowLumaMode === 'native' && cfg.snowLumaDesktopPort !== 0)) ? createOriginalLogin({ mode: cfg.snowLumaMode, container: cfg.snowLumaContainer, nativePort: cfg.snowLumaDesktopPort }) : null;
+    napcatLogin = napcat ? createNapcatLogin({ port: cfg.napcatWebuiPort, configPath: cfg.napcatWebuiConfigPath }) : null;
+  }
+  rebuildGateway();
+  const login = { status: (...args) => loginBackend.status(...args), dispose: () => loginBackend.dispose() };
+  const desktop = { start: (...args) => desktopBackend.start(...args), stop: () => desktopBackend.stop(), upgrade: (...args) => desktopBackend.upgrade(...args), dispose: () => desktopBackend.dispose() };
   const loginHttp = registerLoginHttp({ ctx, login, desktop, readBody,
-    napcatLogin: napcat ? createNapcatLogin({ port: cfg.napcatWebuiPort, configPath: cfg.napcatWebuiConfigPath }) : null,
-    originalLogin: !napcat && (cfg.snowLumaMode === 'docker' || (cfg.snowLumaMode === 'native' && cfg.snowLumaDesktopPort !== 0)) ? { target: (options) => original.target(options), password: (options) => original.password(options), redirect: originalRedirect, dispose: () => original.dispose() } : null,
+    napcatLoginProvider: () => napcatLogin,
+    originalLoginProvider: () => original ? { target: options => original.target(options), password: options => original.password(options), redirect: originalRedirect } : null,
     assetPath: path.join(PKG_DIR, 'assets/desktop-viewer.js') });
+  const deployment = createDeployment({ dataDir, configPath, container: cfg.snowLumaContainer,
+    selected: () => ({ backend: cfg.gatewayBackend, mode: cfg.snowLumaMode, container: cfg.snowLumaContainer }),
+    onSelected: async (selection, { fresh }) => {
+      Object.assign(cfg, { gatewayBackend: selection.backend, snowLumaMode: selection.mode, snowLumaContainer: selection.container });
+      rebuildGateway();
+      if (fresh) await restartBot();
+    } });
+  const deploymentHttp = registerDeploymentHttp({ ctx, deployment });
   const setupAction = async (action, input = {}) => {
     ensureDataDir();
     if (action === 'status') return setup.status();
@@ -620,7 +643,7 @@ export function apply(ctx, config = {}) {
     }
     if (cfg.snowLumaMode !== 'docker') throw new Error('不支持的网关模式');
     let output;
-    try { output = await command('docker', ['inspect', '--format', '{{json .}}', cfg.snowLumaContainer]); }
+    try { output = await command(dockerExecutable(), ['--host', dockerEndpoint(), 'inspect', '--format', '{{json .}}', cfg.snowLumaContainer]); }
     catch (error) {
       if (/No such (object|container)/i.test(error.message)) return { mode: 'docker', name: cfg.snowLumaContainer, running: false, status: 'not-created', composeFile: cfg.snowLumaComposeFile || null };
       throw error;
@@ -643,7 +666,8 @@ export function apply(ctx, config = {}) {
       output = await command('systemctl', nativeServiceArgs(cfg.snowLumaService, cfg.snowLumaServiceScope, op), { timeoutMs: 60000 });
     } else if (cfg.snowLumaMode === 'docker') {
       // Compatibility management only: never create containers, pull images or deploy upstream.
-      output = await command('docker', [op, cfg.snowLumaContainer], { timeoutMs: 60000 });
+      await command(dockerExecutable(), ['--host', dockerEndpoint(), op, cfg.snowLumaContainer], { timeoutMs: 60000 });
+      output = '';
     } else throw new Error('不支持的网关模式');
     return { ok: true, output, status: await gatewayStatus() };
   };
@@ -699,7 +723,8 @@ export function apply(ctx, config = {}) {
   }
 
   ctx.effect(() => () => {
-    loginHttp.dispose();
+    deploymentHttp.dispose(); deployment.dispose();
+    loginHttp.dispose(); original?.dispose(); napcatLogin?.dispose();
     for (const stream of streams) stream.abort();
     stopBot();
   });

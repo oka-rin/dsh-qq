@@ -244,12 +244,12 @@ test('mounted TLS GUI opens and copies from the same selected Docker container a
   const commands = [], probes = [];
   const container = 'Selected_QQ.test-2';
   const original = createOriginalLogin({
-    mode: 'docker', container,
+    mode: 'docker', container, platform: 'linux',
     run: async (bin, args) => {
       commands.push([bin, args]);
-      if (args[0] === 'port') return '[::]:16081\n127.0.0.1:26081\n';
-      if (args[0] === 'inspect') return JSON.stringify(['VNC_PASSWD=testpass', 'OTHER=synthetic-private']);
-      if (args[0] === 'exec') return Buffer.from('87803c720bbb91d5', 'hex');
+      if (args[2] === 'port') return '[::]:16081\n127.0.0.1:26081\n';
+      if (args[2] === 'inspect') return JSON.stringify(['VNC_PASSWD=testpass', 'OTHER=synthetic-private']);
+      if (args[2] === 'exec') return Buffer.from('87803c720bbb91d5', 'hex');
       throw new Error('unexpected lifecycle operation');
     },
     fetcher: async (url, options) => {
@@ -270,15 +270,15 @@ test('mounted TLS GUI opens and copies from the same selected Docker container a
   assert.equal(hop.headers.location, 'http://qq.example.test:26081/vnc.html?autoconnect=1&resize=scale');
   assert.equal(hop.headers['cache-control'], 'no-store');
   assert.ok(!f.calls.some(([name]) => name === 'start'));
-  assert.deepEqual(commands, Array.from({ length: 2 }, () => ['docker', ['port', container, '6081/tcp']]));
+  assert.deepEqual(commands, Array.from({ length: 2 }, () => ['docker', ['--host', 'unix:///var/run/docker.sock', 'port', container, '6081/tcp']]));
   assert.ok(probes.every(([url, options]) => url === 'http://127.0.0.1:26081/vnc.html' && options.redirect === 'error' && options.credentials === 'omit'));
   assert.doesNotMatch(JSON.stringify([ready, hop]), /testpass|synthetic-private/);
   const copied = await f.request('/original/password', { ...post(), prefix: '/dsh' });
   assert.equal(copied.status, 200); assert.deepEqual(copied.json, { ok: true, password: 'testpass' });
   assert.equal(copied.headers['cache-control'], 'no-store'); assert.equal(copied.headers.location, undefined);
   assert.deepEqual(commands.slice(2), [
-    ['docker', ['inspect', '--format', '{{json .Config.Env}}', container]],
-    ['docker', ['exec', container, 'head', '-c', '8', '/root/.vnc/passwd']],
+    ['docker', ['--host', 'unix:///var/run/docker.sock', 'inspect', '--format', '{{json .Config.Env}}', container]],
+    ['docker', ['--host', 'unix:///var/run/docker.sock', 'exec', container, 'head', '-c', '8', '/root/.vnc/passwd']],
   ]);
   assert.doesNotMatch(copied.text, /synthetic-private|root\/\.vnc/);
 });

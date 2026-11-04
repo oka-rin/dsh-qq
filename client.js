@@ -23,6 +23,9 @@ window.__ModuleLoader__.load({
     const request = async (p, init = {}) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 45000);
+      const abort = () => controller.abort();
+      if (init.signal?.aborted) abort();
+      else init.signal?.addEventListener('abort', abort, { once: true });
       try {
         const r = await fetch(B + p, { ...init, cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
         const data = await r.json();
@@ -34,10 +37,10 @@ window.__ModuleLoader__.load({
         return data;
       } catch (error) {
         return { ok: false, error: error.name === 'AbortError' ? '请求超时；写操作结果不明，请先刷新核查，不要重复提交' : String(error.message || error) };
-      } finally { clearTimeout(timeout); }
+      } finally { clearTimeout(timeout); init.signal?.removeEventListener('abort', abort); }
     };
-    const get = (p) => request(p);
-    const post = (p, body) => request(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const get = (p, options = {}) => request(p, options);
+    const post = (p, body, options = {}) => request(p, { ...options, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
     const configWrite = { busy: false };
     function useLifetime() {
       const live = React.useRef(false);
@@ -161,6 +164,56 @@ window.__ModuleLoader__.load({
       napcatHttpWarning: 'NapCat WebUI uses HTTP: tokens and login data may be read or altered on the network. Use only on a trusted network.',
       napcatSetupIntro: 'Connect an administrator-installed native NapCat gateway. Review its service, scan in the official WebUI, then test OneBot; this page executes no installer or administrator commands.',
       napcatManual: 'A host administrator installs and manages NapCat. This page does not install a gateway or use a remote desktop. Review the NapCat service in Operations, then open its official WebUI to scan.',
+    });
+    Object.assign(copy.zh, {
+      setup: '接入与部署', setupTitle: '首次接入 · 部署与登录',
+      setupIntro: '可先使用下方按钮部署 SnowLuma Docker 网关（Linux / Windows 宿主），也可按原生指南手动安装；部署完成后亲自登录 QQ，再检测连接。',
+      setupDocker: '已有机器人和同名容器会保留并复用，不停止、不删除、不重置登录；一键部署不会把已安装原生网关当作 Docker 容器。',
+      deployTitle: '一键部署 · SnowLuma', deployIntro: '在运行 DSH 的宿主机部署，不是在浏览器所在电脑。只有点击并确认才会安装或启动；关闭此页只停止查看，宿主任务会继续。',
+      deployButton: '一键部署 SnowLuma', deployRefresh: '刷新部署状态', deployLoading: '正在检查宿主 Docker…', deployFailed: '部署请求失败；请刷新状态核查，勿重复提交。', deployInvalid: '宿主返回的部署状态无效。',
+      deployDocker: 'Docker', deployInstalled: '已安装', deployMissing: '未安装', deployReady: '引擎就绪', deployNotReady: '引擎未就绪', deployImage: 'SnowLuma 镜像', deployContainer: '配置的容器',
+      deployExistingRunning: '发现已有容器正在运行；将复用并保留现有登录。', deployExistingStopped: '发现已有容器；将复用，保留数据和登录，不重建或重置。',
+      deployInstall: '允许在此宿主安装缺失的 Docker（Linux Docker Engine / Windows Docker Desktop）；可能需要管理员权限。',
+      deployWsl: '允许 Windows 宿主执行 wsl --install --no-distribution 以准备 WSL2；可能需要管理员确认和重启，不安装发行版、不代接受许可。',
+      deployWslApproval: '尚未授权准备 WSL2。若希望自动准备，请先勾选上方 WSL2 许可，再点击「一键部署 SnowLuma」重新开始；「继续」不会追加新许可。也可请管理员手动准备 WSL2 后刷新重试。',
+      deployWindowsInstalled: 'Docker 已安装但引擎尚未就绪：请在 DSH 宿主机打开 Docker Desktop，亲自审阅所需许可/订阅，核查 WSL2 并按提示重启，等待引擎运行。完成后刷新状态；如任务显示「需要本人操作」，点击「已完成手动步骤，继续」。',
+      deployAuthorized: '仅新建部署：我有权安装和使用 SnowLuma / QQ，并已自行核实上游 EULA；不代接受协议。',
+      deployRisk: '仅新建部署：我了解 SnowLuma 的注入及 SYS_PTRACE / ptrace 权限风险，并授权此部署。',
+      deployPublic: '允许公开桌面端口（默认关闭）。普通 HTTP 未加密，桌面画面、键盘输入与访问密码可能被读取或篡改；仅在可信网络使用。',
+      deployExistingPublic: '如已有容器公开端口，我明确同意按原映射复用；不会自动关闭或改写这些端口。',
+      deployConsent: '请确认新建部署的使用授权与注入风险；缺少 Docker 时另需明确允许安装。',
+      deployConfirm: '确认在 DSH 宿主机部署 SnowLuma？将按勾选许可安装缺失 Docker、拉取镜像并创建或复用配置容器；保留已有登录，不停止或重置已有机器人。QQ 登录和许可确认仍需本人完成。',
+      deployResumeConfirm: '确认已亲自完成宿主提示的手动步骤，并继续原部署任务？不会替你接受 Docker Desktop 或 QQ 协议。',
+      deployResume: '已完成手动步骤，继续', deployWorking: '正在提交…', deployElapsed: '已用时', deploySeconds: '秒', deployStage: '当前阶段', deploySteps: '阶段记录（安全摘要）',
+      deployRunning: '正在部署', deploySucceeded: '部署完成；请到下方亲自登录并检测连接', deployTaskFailed: '部署失败', deployNeedsAction: '需要本人操作',
+      deployWindows: 'Windows 可能需要本人确认 UAC、启用 WSL2、重启宿主或启动 Docker Desktop。Docker Desktop 可能要求许可或订阅；请本人阅读并接受，不会自动代同意或绕过。完成后刷新并继续。',
+      deployAdmin: '如权限不足，请由宿主管理员处理；此页不收集管理员密码，也不会绕过提权。', deployRestart: 'Docker 报告需要重启宿主；请自行安排重启后再刷新并继续。',
+      deployUnsupported: '当前宿主不支持一键部署（仅支持 Linux / Windows）。', deployCannotInstall: '宿主不能自动安装 Docker；请管理员完成安装后刷新。',
+    });
+    Object.assign(copy.en, {
+      setup: 'Setup & deployment', setupTitle: 'First-run setup · deploy & log in',
+      setupIntro: 'Deploy a SnowLuma Docker gateway below on a Linux / Windows host, or install manually with the native guide. Then log in to QQ personally and test the connection.',
+      setupDocker: 'Existing bots and the configured named container are preserved and reused, never stopped, deleted or login-reset. Native gateways are not treated as Docker containers.',
+      deployTitle: 'One-click deployment · SnowLuma', deployIntro: 'Runs on the DSH host, not your browser’s computer. Installation/startup requires your click and confirmation. Closing this page stops viewing only; the host task continues.',
+      deployButton: 'Deploy SnowLuma', deployRefresh: 'Refresh deployment status', deployLoading: 'Checking host Docker…', deployFailed: 'Deployment request failed. Refresh status before retrying; do not submit twice.', deployInvalid: 'The Host returned an invalid deployment status.',
+      deployDocker: 'Docker', deployInstalled: 'Installed', deployMissing: 'Not installed', deployReady: 'Engine ready', deployNotReady: 'Engine not ready', deployImage: 'SnowLuma image', deployContainer: 'Configured container',
+      deployExistingRunning: 'Existing container is running; it will be reused with its login preserved.', deployExistingStopped: 'Existing container found; reuse preserves its data and login, without recreation or reset.',
+      deployInstall: 'Allow installing missing Docker on this host (Linux Docker Engine / Windows Docker Desktop); administrator privileges may be required.',
+      deployWsl: 'Allow wsl --install --no-distribution on the Windows host to prepare WSL2. Administrator approval and reboot may be needed; no distribution is installed and no license is accepted for you.',
+      deployWslApproval: 'WSL2 preparation is not authorized. To prepare it automatically, check the WSL2 permission above and click “Deploy SnowLuma” to start again; resume cannot add new permissions. Alternatively, ask an administrator to prepare WSL2 manually, then refresh and retry.',
+      deployWindowsInstalled: 'Docker is installed but its engine is not ready. On the DSH host, open Docker Desktop, personally review required licenses/subscriptions, check WSL2 and reboot if requested, then wait for the engine to run. Refresh status afterward; if the task says your action is required, click “Manual steps completed · resume”.',
+      deployAuthorized: 'New deployments only: I am authorized to install/use SnowLuma and QQ and have checked upstream terms. No agreement is accepted for me.',
+      deployRisk: 'New deployments only: I understand and authorize SnowLuma injection and SYS_PTRACE / ptrace permission risks.',
+      deployPublic: 'Allow public desktop ports (off by default). Plain HTTP is unencrypted: screens, keyboard input and access passwords may be read or altered. Use only on a trusted network.',
+      deployExistingPublic: 'If the existing container has public ports, I explicitly allow reusing those mappings; they will not be silently closed or rewritten.',
+      deployConsent: 'Confirm new-deployment authorization and injection risks; missing Docker also requires explicit installation permission.',
+      deployConfirm: 'Deploy SnowLuma on the DSH host? Subject to your permissions, install missing Docker, pull the image, and create or reuse the configured container. Existing login is preserved; existing bots are not stopped or reset. You must complete QQ login and license review yourself.',
+      deployResumeConfirm: 'Have you personally completed the required host steps and wish to resume the existing task? Docker Desktop and QQ agreements will not be accepted for you.',
+      deployResume: 'Manual steps completed · resume', deployWorking: 'Submitting…', deployElapsed: 'Elapsed', deploySeconds: 'seconds', deployStage: 'Current stage', deploySteps: 'Stage history (safe summary)',
+      deployRunning: 'Deploying', deploySucceeded: 'Deployment complete · log in personally and test below', deployTaskFailed: 'Deployment failed', deployNeedsAction: 'Your action is required',
+      deployWindows: 'Windows may require personal UAC approval, WSL2 enablement, a host reboot or starting Docker Desktop. Docker Desktop may require a license/subscription: read and accept it yourself. No automatic agreement acceptance or bypass. Refresh and resume when done.',
+      deployAdmin: 'For permission errors, ask the host administrator. This page never collects administrator passwords or bypasses elevation.', deployRestart: 'Docker reports a host reboot is needed. Arrange it yourself, then refresh and resume.',
+      deployUnsupported: 'One-click deployment supports Linux / Windows hosts only.', deployCannotInstall: 'Docker cannot be installed automatically on this host. Ask an administrator to install it, then refresh.',
     });
     let tr = (key) => copy.zh[key] || key;
 
@@ -1180,6 +1233,7 @@ window.__ModuleLoader__.load({
           h('p', { style: { color: T.warn } }, tr('setupEula')),
           h('div', { style: S.dim }, tr('setupAuto'), info?.automaticInstall?.reason ? ` · ${safeText(info.automaticInstall.reason)}` : ''),
           info?.native?.service ? h('p', { style: { ...S.dim, overflowWrap: 'anywhere' } }, `${tr('setupService')}: ${safeText(info.native.service)} · ${tr(info.native.scope === 'system' ? 'setupSystemScope' : 'setupUserScope')}`) : null),
+        active && info?.backend !== 'napcat' ? h(DeploymentPanel, { onDeployed: () => { read(); onSaved?.(); } }) : null,
         active && info ? h(LoginPanel, { key: info.backend || 'snowluma', backend: info.backend }) : null,
         h('section', { style: S.card, 'aria-label': tr('setupConnect') },
           h('h2', { style: S.h2 }, tr('setupConnect')),
@@ -1207,6 +1261,155 @@ window.__ModuleLoader__.load({
             h('p', { style: { color: T.warn } }, tr(saved.restartRequired ? 'setupRestart' : 'setupNoRestart')),
             h('button', { type: 'button', style: S.btn(false), onClick: onOps }, tr('setupOps'))) : null,
           message ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, message) : null));
+    }
+
+    // Deployment helpers are independently testable; never retain raw task output or credentials.
+    function deploymentText(value) {
+      return String(value ?? '').replace(/data:[^\s]+/gi, '[private data]')
+        .replace(/(bearer\s+)\S+/gi, '$1[redacted]')
+        .replace(/((?:password|passwd|token|api[_-]?key|authorization|secret)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[redacted]')
+        .replace(/([a-z]+:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@')
+        .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').slice(0, 700);
+    }
+    function deploymentTask(task) {
+      if (!task || !['running', 'succeeded', 'failed', 'needs_action'].includes(task.state)) throw new Error(tr('deployInvalid'));
+      const step = item => ({ stage: deploymentText(item?.stage), message: deploymentText(item?.message), at: deploymentText(item?.at) });
+      return { id: deploymentText(task.id), state: task.state, reason: deploymentText(task.reason), ...step(task),
+        elapsedMs: Number.isFinite(Number(task.elapsedMs)) ? Math.max(0, Number(task.elapsedMs)) : 0,
+        startedAt: deploymentText(task.startedAt), finishedAt: deploymentText(task.finishedAt),
+        steps: (Array.isArray(task.steps) ? task.steps : []).slice(-24).map(step) };
+    }
+    function deploymentStatus(result) {
+      if (result?.ok !== true || !result.host || !result.docker || !result.defaults || !result.selected) throw new Error(deploymentText(result?.error || result?.reason) || tr('deployInvalid'));
+      return { host: { platform: deploymentText(result.host.platform), arch: deploymentText(result.host.arch) },
+        docker: { installed: result.docker.installed === true, ready: result.docker.ready === true,
+          state: deploymentText(result.docker.state), reason: deploymentText(result.docker.reason), canInstall: result.docker.canInstall === true,
+          requiresAdmin: result.docker.requiresAdmin === true, needsRestart: result.docker.needsRestart === true },
+        defaults: { image: deploymentText(result.defaults.image), container: deploymentText(result.defaults.container) },
+        selected: { backend: deploymentText(result.selected.backend), mode: deploymentText(result.selected.mode), container: deploymentText(result.selected.container) },
+        existing: { exists: result.existing?.exists === true, running: result.existing?.running === true, container: deploymentText(result.existing?.container) },
+        task: result.task == null ? null : deploymentTask(result.task),
+        warnings: (Array.isArray(result.warnings) ? result.warnings : []).slice(0, 12).map(deploymentText) };
+    }
+    function deploymentActionHint(status) {
+      const task = status?.task;
+      if ([task?.reason, task?.stage, status?.docker.reason, status?.docker.state].some(value => value === 'wsl-install-approval-required')) return 'deployWslApproval';
+      if (status?.host.platform === 'win32' && status.docker.installed && !status.docker.ready) return 'deployWindowsInstalled';
+      return '';
+    }
+    function deploymentBody(status, choices) {
+      if (!status || !['linux', 'win32'].includes(status.host.platform)) throw new Error(tr('deployUnsupported'));
+      if (!choices.authorized || !choices.injectionRisk || (!status.docker.installed && !choices.installDocker)) throw new Error(tr('deployConsent'));
+      return { confirm: true, installDocker: choices.installDocker === true, installWsl: status.host.platform === 'win32' && choices.installWsl === true,
+        authorized: choices.authorized === true, injectionRisk: choices.injectionRisk === true,
+        publicDesktop: choices.publicDesktop === true, allowExistingPublicPorts: choices.allowExistingPublicPorts === true,
+        image: String(choices.image || status.defaults.image).trim() };
+    }
+    // One session per visible panel. Serial GET/POST, no operation on mount, no host cancellation.
+    function createDeploymentSession({ getStatus, postTask, confirm, update, schedule = setTimeout, cancel = clearTimeout }) {
+      let closed = false, locked = false, mustRefresh = false, timer = null, controller = null, status = null, operationError = '';
+      const publish = value => { if (!closed) update(value); };
+      const clear = () => { if (timer != null) cancel(timer); timer = null; };
+      const poll = () => {
+        clear();
+        if (!closed && status?.task?.state === 'running') timer = schedule(() => { timer = null; refresh(); }, 2000);
+      };
+      const refresh = async () => {
+        if (closed || locked) return false;
+        clear(); locked = true; controller = new AbortController(); publish({ checking: true });
+        try {
+          const next = deploymentStatus(await getStatus(controller.signal));
+          if (closed) return false;
+          status = next; mustRefresh = false; publish({ status, error: operationError }); return true;
+        } catch (error) { publish({ error: deploymentText(error.message) || tr('deployFailed') }); return false; }
+        finally { locked = false; controller = null; publish({ checking: false }); poll(); }
+      };
+      const run = async (choices, resume = false) => {
+        if (closed || locked) return false;
+        if (mustRefresh) { publish({ error: operationError || tr('deployFailed') }); return false; }
+        if (resume ? status?.task?.state !== 'needs_action' : status?.task?.state === 'running' || status?.task?.state === 'needs_action') return false;
+        let body;
+        try { body = resume ? { confirm: true } : deploymentBody(status, choices); }
+        catch (error) { publish({ error: deploymentText(error.message) }); return false; }
+        // Synchronous browser confirmation: tools cannot grant this authority.
+        if (!confirm(tr(resume ? 'deployResumeConfirm' : 'deployConfirm'))) return false;
+        clear(); locked = true; mustRefresh = true; operationError = ''; controller = new AbortController(); publish({ busy: true, error: '' });
+        try {
+          const result = await postTask(resume ? '/deploy/resume' : '/deploy/start', body, controller.signal);
+          if (closed) return false;
+          if (result?.ok !== true) throw new Error(result?.error || result?.reason || tr('deployFailed'));
+          status = { ...status, task: deploymentTask(result.task) }; publish({ status, error: '' }); return true;
+        } catch (error) { operationError = deploymentText(error.message) || tr('deployFailed'); publish({ error: operationError }); return false; }
+        finally {
+          locked = false; controller = null; publish({ busy: false });
+          // Reconcile after every submitted write, including ambiguous timeout/errors.
+          if (!closed) timer = schedule(() => { timer = null; refresh(); }, 0);
+        }
+      };
+      return { refresh, run, close() { closed = true; clear(); controller?.abort(); controller = null; } };
+    }
+    function DeploymentPanel({ onDeployed }) {
+      const [view, setView] = React.useState({ status: null, busy: false, checking: true, error: '' });
+      const [choices, setChoices] = React.useState({ image: '', installDocker: false, installWsl: false, authorized: false, injectionRisk: false, publicDesktop: false, allowExistingPublicPorts: false });
+      const session = React.useRef(null);
+      const completed = React.useRef('');
+      React.useEffect(() => {
+        const current = createDeploymentSession({
+          getStatus: signal => get('/deploy/status', { signal }),
+          postTask: (path, body, signal) => post(path, body, { signal }),
+          confirm: text => window.confirm(text),
+          update: patch => setView(old => ({ ...old, ...patch })),
+        });
+        session.current = current;
+        const first = setTimeout(() => current.refresh(), 0);
+        return () => { clearTimeout(first); current.close(); if (session.current === current) session.current = null; };
+      }, []);
+      const status = view.status, task = status?.task;
+      const actionHint = deploymentActionHint(status);
+      React.useEffect(() => {
+        if (task?.state === 'succeeded' && task.id !== completed.current) { completed.current = task.id; onDeployed?.(); }
+      }, [task?.id, task?.state]);
+      const change = (key, value) => setChoices(old => ({ ...old, [key]: value }));
+      const blocked = view.busy || view.checking || task?.state === 'running' || task?.state === 'needs_action';
+      const supported = ['linux', 'win32'].includes(status?.host.platform);
+      const canStart = status && supported && choices.authorized && choices.injectionRisk && (status.docker.installed || (status.docker.canInstall && choices.installDocker));
+      const check = (key, label) => h('label', { style: { display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 9 } },
+        h('input', { type: 'checkbox', checked: choices[key], onChange: event => change(key, event.target.checked), style: { marginTop: 5, flexShrink: 0 } }), h('span', null, tr(label)));
+      const taskLabel = { running: 'deployRunning', succeeded: 'deploySucceeded', failed: 'deployTaskFailed', needs_action: 'deployNeedsAction' };
+      return h('section', { style: S.card, 'aria-label': tr('deployTitle'), 'aria-busy': view.busy || view.checking },
+        h('div', { style: { ...S.h2row, flexWrap: 'wrap' } }, h('h2', { style: S.h2inner }, tr('deployTitle')),
+          h('button', { type: 'button', style: S.btn(false), disabled: view.busy || view.checking, onClick: () => session.current?.refresh() }, tr('deployRefresh'))),
+        h('p', { style: S.dim }, tr('deployIntro')),
+        !status && view.checking ? h('p', { role: 'status' }, tr('deployLoading')) : null,
+        status ? h('div', null,
+          h('p', { style: S.dim }, `${tr('setupHost')}: ${status.host.platform} / ${status.host.arch} · ${tr('deployDocker')}: ${tr(status.docker.installed ? 'deployInstalled' : 'deployMissing')} · ${tr(status.docker.ready ? 'deployReady' : 'deployNotReady')}`),
+          h('p', { style: { ...S.dim, overflowWrap: 'anywhere' } }, `${tr('deployContainer')}: ${status.existing.container || status.selected.container || status.defaults.container} · ${status.selected.backend} / ${status.selected.mode}`),
+          h('p', { style: S.dim }, tr('setupDocker')),
+          status.existing.exists ? h('p', { style: { color: T.success } }, tr(status.existing.running ? 'deployExistingRunning' : 'deployExistingStopped')) : null,
+          status.docker.reason ? h('p', { style: { color: T.warn, overflowWrap: 'anywhere' } }, status.docker.reason) : null,
+          !supported ? h('p', { style: { color: T.warn } }, tr('deployUnsupported')) : null,
+          !status.docker.installed && !status.docker.canInstall ? h('p', { style: { color: T.warn } }, tr('deployCannotInstall')) : null,
+          status.docker.needsRestart ? h('p', { style: { color: T.warn } }, tr('deployRestart')) : null,
+          ...status.warnings.map((warning, i) => h('p', { key: i, style: { color: T.warn, overflowWrap: 'anywhere' } }, warning))) : null,
+        h('fieldset', { disabled: blocked || !status, style: { border: 0, padding: 0, margin: '12px 0', minWidth: 0 } },
+          h('label', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 } }, tr('deployImage'),
+            h('input', { type: 'text', style: { ...输入框, width: '100%' }, value: choices.image || status?.defaults.image || '', autoComplete: 'off', spellCheck: false, onChange: event => change('image', event.target.value) })),
+          !status?.docker.installed ? check('installDocker', 'deployInstall') : null,
+          status?.host.platform === 'win32' ? check('installWsl', 'deployWsl') : null,
+          check('authorized', 'deployAuthorized'), check('injectionRisk', 'deployRisk'),
+          check('publicDesktop', 'deployPublic'), check('allowExistingPublicPorts', 'deployExistingPublic')),
+        h('button', { type: 'button', style: S.btn(true), disabled: blocked || !canStart, onClick: () => session.current?.run(choices) }, tr(view.busy ? 'deployWorking' : 'deployButton')),
+        task ? h('div', { role: 'status', 'aria-live': 'polite', style: { marginTop: 12, overflowWrap: 'anywhere' } },
+          h('strong', { style: { color: task.state === 'succeeded' ? T.success : task.state === 'failed' ? T.error : T.warn } }, tr(taskLabel[task.state])),
+          h('p', null, `${tr('deployStage')}: ${task.stage} · ${tr('deployElapsed')}: ${Math.floor(task.elapsedMs / 1000)} ${tr('deploySeconds')}`),
+          h('p', null, task.message),
+          task.steps.length ? h('details', null, h('summary', null, tr('deploySteps')), h('ol', { style: { paddingLeft: 22 } },
+            ...task.steps.map((step, i) => h('li', { key: i }, `${step.stage}: ${step.message}`)))) : null,
+          task.state === 'needs_action' ? h('button', { type: 'button', style: S.btn(false), disabled: view.busy || view.checking, onClick: () => session.current?.run(choices, true) }, tr('deployResume')) : null) : null,
+        actionHint ? h('p', { role: 'note', style: { color: T.warn } }, tr(actionHint)) : null,
+        status?.host.platform === 'win32' ? h('p', { style: { ...S.dim, color: T.warn } }, tr('deployWindows')) : null,
+        h('p', { style: S.dim }, tr('deployAdmin')),
+        view.error ? h('p', { role: 'alert', style: { color: T.error, overflowWrap: 'anywhere' } }, view.error) : null);
     }
 
     // 运维：机器人进程 + 实时动态

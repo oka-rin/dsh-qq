@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "QQ bot integration for DeepSeek Harness: bundled bot, NapCat/SnowLuma/OneBot connection, control panel and QQ tools. Gateways are external.",
   "type": "module",
   "license": "MIT",
@@ -22,6 +22,9 @@
     "setup.js",
     "login.js",
     "desktop.js",
+    "deployment.js",
+    "deploy-http.js",
+    "docker-prerequisites.js",
     "deploy/*.yml",
     "cordis.patch.yml",
     "bot/src/*.mjs",

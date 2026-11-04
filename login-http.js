@@ -53,7 +53,7 @@ function body(req, signal) {
 }
 
 /** Browser-only credential surfaces; never register these operations as model tools. */
-export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogin = null, napcatLogin = null }) {
+export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogin = null, napcatLogin = null, originalLoginProvider = () => originalLogin, napcatLoginProvider = () => napcatLogin }) {
   let session = null, busy = false, disposed = false;
   let passwordWindowAt = Date.now(), passwordRequests = 0;
   const requests = new Set();
@@ -104,6 +104,7 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
   });
 
   exact('/napcat', async (req, res, signal) => {
+    const napcatLogin = napcatLoginProvider();
     if (req.method !== 'GET' || !napcatLogin) throw new Error('NapCat WebUI 未配置');
     try {
       await until(napcatLogin.target({ signal }), signal);
@@ -112,6 +113,7 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
     } catch { throw new Error('无法打开 NapCat 官方 WebUI；请检查服务与端口'); }
   });
   exact('/napcat/token', async (req, res, signal) => {
+    const napcatLogin = napcatLoginProvider();
     mutation(req);
     const input = await body(req, signal);
     if (Object.keys(input).length) throw new Error('token 请求不接受参数');
@@ -130,6 +132,7 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
   // Only advertise this fixed authenticated hop; never accept a redirect URL
   // from the browser. Credential retrieval is a separate explicit POST below.
   exact('/original', async (req, res, signal) => {
+    const originalLogin = originalLoginProvider();
     if (req.method !== 'GET' || !originalLogin) throw new Error('原版 SnowLuma 网页桌面未配置');
     const target = await until(originalLogin.target({ signal }), signal);
     const location = originalLogin.redirect(req, target);
@@ -137,6 +140,7 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
   });
 
   exact('/original/password', async (req, res, signal) => {
+    const originalLogin = originalLoginProvider();
     mutation(req);
     const input = await body(req, signal);
     if (Object.keys(input).length) throw new Error('密码请求不接受参数');
@@ -159,6 +163,7 @@ export function registerLoginHttp({ ctx, login, desktop, assetPath, originalLogi
   });
 
   exact('/desktop/session', async (req, res, signal) => {
+    const originalLogin = originalLoginProvider(), napcatLogin = napcatLoginProvider();
     mutation(req);
     const input = await body(req, signal);
     if (Object.keys(input).length) throw new Error('桌面请求不接受参数');

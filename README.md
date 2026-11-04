@@ -2,7 +2,7 @@
 
 **让 DeepSeek Harness 接入你的 QQ：聊天、看图看视频、查记录、发消息，都在一个插件里。**
 
-[安装使用](#安装使用) · [SnowLuma Docker 自动部署](./docs/docker.md) · [原生迁移](./docs/native.md) · [高级配置](./docs/advanced.md) · [反馈问题](https://github.com/oka-rin/dsh-qq/issues)
+[安装使用](#安装使用) · [SnowLuma 一键部署](./docs/docker.md) · [原生迁移](./docs/native.md) · [高级配置](./docs/advanced.md) · [反馈问题](https://github.com/oka-rin/dsh-qq/issues)
 
 ## 能做什么
 
@@ -24,7 +24,7 @@
 - **NapCat / SnowLuma / OneBot 后端**，拿到 HTTP、正向 WebSocket 地址和 Token。NapCat 可直接在官方 WebUI 扫码，不需要 VNC。详见 [NapCat 接入](./docs/napcat.md)。
 - **模型接口**：OpenAI 兼容的接口地址、模型名和 API Key。
 
-**没有 QQ 后端？** 可审阅并使用本仓库 [SnowLuma Docker 自动部署脚本](./docs/docker.md)：默认离线预览，明确确认后才创建或核对接管现有实例，不覆盖旧数据；登录仍由你在原版网页完成。插件不捆绑镜像、不隐式执行安装、不代替你取得上游部署授权或同意 QQ / 上游条款。NapCat 仍作为可选已有后端兼容，见 [NapCat 接入](./docs/napcat.md)。
+**没有 QQ 后端？** 安装插件后打开 **DSH 设置 → QQ 机器人 → 接入与部署 → 一键部署 SnowLuma**。支持运行 DSH 的 Linux / Windows 宿主；缺少 Docker 时，可单独授权准备依赖。所有确认框默认不勾选，点击并确认后才部署；已有容器核对复用，不重建、不重置密码或登录。Windows 的 UAC、Docker Desktop 许可、WSL2、重启及 QQ 登录可能需要本人操作，不能全自动完成。详见[一键部署与手动脚本](./docs/docker.md)。插件不捆绑镜像、不隐式安装、不代取得所需部署授权或接受上游 / QQ 条款。NapCat 仍可作为已有后端连接。
 
 ### 2. 安装插件
 
@@ -36,7 +36,7 @@
 
 ### 3. 连接 QQ 和模型
 
-打开 **DSH 设置 → QQ 机器人 → 原生接入**（首次配置页），填写：
+打开 **DSH 设置 → QQ 机器人 → 接入与部署**。使用上方一键部署后，先在原版网页登录 QQ，并按 SnowLuma 原版流程人工审阅条款、配置网关 hook，再检测连接；新建部署只保存本机 OneBot 接入信息，不代表已在线。已有后端可直接填写：
 
 | 填什么 | 示例 |
 | --- | --- |
@@ -78,7 +78,7 @@
 
 **已经用 Docker 跑着 SnowLuma？** 可继续连接原实例，使用 [Docker 兼容模式](./docs/advanced.md#既有-docker-后端兼容非默认)。想迁到原生时按[备份、切换与回滚步骤](./docs/native.md#从-docker-切换到原生)操作；安装脚本不会停止容器、复制登录态或删除卷，扫码登录和验收仍需人工完成。
 
-**更新会丢聊天记录吗？** 配置、聊天归档和学习数据放在独立数据目录，不在插件代码里。沿用原 `dataDir` 并先备份，不要另开一个机器人实例。[迁移与回滚](./docs/advanced.md#从拆分部署迁移与回滚)
+**更新会丢聊天记录吗？** 配置、聊天归档和学习数据放在独立数据目录，不在插件代码里。沿用原 `dataDir` 并先备份，不要另开一个机器人实例。一键部署的网关选择保存在 `dataDir/gateway-deployment.json`，优先于旧插件后端选择；不会搬迁聊天和档案数据。[迁移与回滚](./docs/advanced.md#从拆分部署迁移与回滚)
 
 ## 更多
 

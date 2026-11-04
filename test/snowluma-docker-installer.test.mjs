@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { parseArgs, runInstaller, createArgs, freshConfig, main, safeError, verifyExisting, INSPECT_FORMAT } from '../scripts/install-snowluma-docker.mjs';
+import { parseArgs, runInstaller, createArgs, freshConfig, main, safeError, verifyExisting, INSPECT_FORMAT, dockerEndpoint } from '../scripts/install-snowluma-docker.mjs';
 
 // Every command is injected. These tests must NEVER call a real Docker daemon.
 const PIN = 'motricseven7/snowluma@sha256:' + 'a'.repeat(64);
@@ -78,7 +78,7 @@ test('fresh create requires cached image, uses private files and never starts/pu
   const root = await TEMP(t), dir = path.join(root, 'new');
   const options = fresh(dir), docker = fakeDocker(options);
   const result = await runInstaller(options, docker.run);
-  assert.equal(result.created, true); assert.equal(result.started, false); assert.equal(result.termsAccepted, false);
+  assert.equal(result.created, true); assert.equal(result.id, ID); assert.equal(result.started, false); assert.equal(result.termsAccepted, false);
   assert.deepEqual(docker.calls.map(c => c[0]), ['container', 'image', 'create', 'container']);
   const cfg = JSON.parse(await fs.readFile(path.join(dir, 'data/config/onebot.json'), 'utf8'));
   const http = cfg.networks.httpServers[0], ws = cfg.networks.wsServers[0];
@@ -218,7 +218,10 @@ test('fresh path requires trusted non-writable ancestors and private parent belo
 test('Docker wrapper pins local Unix socket independent of user Docker context', async () => {
   // Source inspection deliberately avoids starting even a fake CLI process.
   const source = await fs.readFile(new URL('../scripts/install-snowluma-docker.mjs', import.meta.url), 'utf8');
-  assert.equal(source.includes("spawn('docker', ['--host', 'unix:///var/run/docker.sock', ...args]"), true);
+  assert.equal(dockerEndpoint('linux'), 'unix:///var/run/docker.sock');
+  assert.equal(dockerEndpoint('win32'), 'npipe:////./pipe/dockerDesktopLinuxEngine');
+  assert.throws(() => dockerEndpoint('darwin'), /unsupported-platform/);
+  assert.equal(source.includes("spawn(dockerExecutable(platform), ['--host', endpoint, ...args]"), true);
   assert.equal(source.includes('DOCKER_HOST:'), false);
   assert.equal(source.includes('DOCKER_CONTEXT:'), false);
 });
@@ -241,4 +244,177 @@ test('errors/output never disclose upstream credentials, paths or supplied argv'
   assert.equal(safeError(new Error('secret upstream stderr')), 'operation-failed');
   const cfg = freshConfig('http-test-token', 'ws-test-token');
   assert.equal(cfg.networks.wsServers[0].accessToken, 'ws-test-token');
+});
+
+const windowsFresh = (extra = {}) => ({ mode: 'install', platform: 'win32', container: 'snowluma', image: PIN, uid: 59999, gid: 59999, httpPort: 3000, wsPort: 3001, webuiPort: 5099, desktopPort: 6081, confirmInstall: true, authorized: true, injectionRisk: true, ...extra });
+function windowsDocker(options, { osType = 'linux', occupied = false, collision = false, wrongVolume = false, badMount = false, failCopy = false, forgedLabel = false } = {}) {
+  const calls = [], archives = [], volumes = [];
+  let createdState;
+  const run = async (args, transport) => {
+    assert.equal(transport.platform, options.platform);
+    calls.push([...args]);
+    if (args[0] === 'info') return osType;
+    if (args[0] === 'container' && args[1] === 'ls') return occupied ? options.container : '';
+    if (args[0] === 'image') return IMAGE_ID;
+    if (args[0] === 'volume' && args[1] === 'ls') return collision ? args[args.indexOf('--filter') + 1].slice(6, -1) : '';
+    if (args[0] === 'volume' && args[1] === 'create') {
+      volumes.push({ name: args.at(-1), nonce: args[args.indexOf('--label') + 1].split('=')[1] });
+      return wrongVolume ? 'wrong-volume' : args.at(-1);
+    }
+    if (args[0] === 'volume' && args[1] === 'inspect') {
+      const v = volumes.find(v => v.name === args.at(-1));
+      return JSON.stringify({ Name: v.name, Driver: 'local', Scope: 'local', Labels: { 'dev.dsh.snowluma.fresh': forgedLabel ? 'preexisting' : v.nonce }, Options: null });
+    }
+    if (args[0] === 'create') {
+      createdState = state(options);
+      createdState.mounts = createdState.mounts.map((m, i) => ({ ...m, Name: volumes[i].name, Source: `/var/lib/docker/volumes/${volumes[i].name}/_data` }));
+      if (badMount) createdState.mounts[0] = state().mounts[0];
+      return ID;
+    }
+    if (args[0] === 'container' && args[1] === 'inspect') return inspect(createdState || state());
+    if (args[0] === 'cp') {
+      assert.ok(Buffer.isBuffer(transport.input));
+      archives.push(Buffer.from(transport.input));
+      if (failCopy) throw new Error('PRIVATE_UPSTREAM_COPY_ERROR');
+      return '';
+    }
+    if (args[0] === 'start' || args[0] === 'pull') return ID;
+    throw new Error('unexpected fake Windows Docker operation');
+  };
+  return { run, calls, archives, volumes };
+}
+function tarEntries(archive) {
+  const result = [];
+  for (let offset = 0; offset + 512 <= archive.length; ) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every(b => b === 0)) break;
+    const text = (start, size) => header.subarray(start, start + size).toString().replace(/\0.*$/s, '').trim();
+    const size = parseInt(text(124, 12), 8);
+    const checksum = parseInt(text(148, 8), 8);
+    assert.equal(checksum, [...header].reduce((sum, b, i) => sum + (i >= 148 && i < 156 ? 32 : b), 0));
+    result.push({ name: text(0, 100), uid: parseInt(text(108, 8), 8), gid: parseInt(text(116, 8), 8), mode: parseInt(text(100, 8), 8), content: archive.subarray(offset + 512, offset + 512 + size).toString() });
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return result;
+}
+
+test('Linux named-volumes plan is offline; fresh CLI retains gates and rejects ambiguous storage', async () => {
+  const plan = parseArgs(['--named-volumes']); let calls = 0;
+  const result = await runInstaller(plan, async () => { calls++; throw new Error('never'); });
+  assert.equal(result.offline, true); assert.equal(calls, 0);
+  const args = ['--install', '--confirm-install', '--confirm-authorized-deployment', '--allow-qq-injection-risk', '--named-volumes', '--image', PIN];
+  assert.equal(parseArgs(args).namedVolumes, true);
+  assert.equal(parseArgs(args).dataDir, undefined);
+  assert.throws(() => parseArgs([...args, '--data-dir', '/srv/new-state']), /named-volumes-conflict-with-data-dir/);
+  for (const flag of ['--confirm-install', '--confirm-authorized-deployment', '--allow-qq-injection-risk']) {
+    assert.throws(() => parseArgs(args.filter(arg => arg !== flag)));
+  }
+  await assert.rejects(runInstaller(windowsFresh({ platform: 'linux', namedVolumes: 'true' })), /invalid-named-volumes-option/);
+});
+
+test('Linux opt-in named volumes seed private Linux-owned state without host bind/chown', async () => {
+  const options = windowsFresh({ platform: 'linux', namedVolumes: true, start: true });
+  const docker = windowsDocker(options), result = await runInstaller(options, docker.run);
+  assert.equal(result.id, ID); assert.equal(result.created, true); assert.equal(result.started, true);
+  assert.deepEqual(docker.calls[0], ['info', '--format', '{{.OSType}}']);
+  const create = docker.calls.find(c => c[0] === 'create').join(' ');
+  assert.equal(create.includes('type=bind'), false); assert.equal(create.includes('volume-nocopy'), true);
+  assert.equal(docker.volumes.length, 3); assert.equal(docker.archives.length, 3);
+  for (const archive of docker.archives) for (const entry of tarEntries(archive)) {
+    assert.equal(entry.uid, 59999); assert.equal(entry.gid, 59999);
+    assert.equal(entry.mode, entry.name.endsWith('.json') || entry.name.endsWith('vnc-password') ? 0o600 : 0o700);
+  }
+  assert.deepEqual(docker.calls.at(-1), ['start', ID]);
+  const invalidEngine = windowsDocker(options, { osType: 'windows' });
+  await assert.rejects(runInstaller(options, invalidEngine.run), /linux-container-engine-required/);
+  assert.equal(invalidEngine.calls.length, 1);
+  for (const failure of [{ collision: true }, { forgedLabel: true }, { badMount: true }, { failCopy: true }]) {
+    const failed = windowsDocker(options, failure);
+    await assert.rejects(runInstaller(options, failed.run));
+    assert.equal(failed.calls.some(c => c[0] === 'start' || c.includes('rm') || c.includes('prune')), false);
+  }
+});
+
+test('Linux named-volumes preference does not rewrite or reject safe existing binds', async t => {
+  const root = await TEMP(t), options = { ...parseArgs(['--check', '--adopt-existing', '--image', PIN, '--named-volumes']), platform: 'linux' };
+  for (const name of ['data', 'qq-config', 'qq-share']) await fs.mkdir(path.join(root, name));
+  const docker = fakeDocker(options, { customState: state(options, root) });
+  const result = await runInstaller(options, docker.run);
+  assert.equal(result.adopted, true); assert.equal(result.readOnly, true); assert.equal(result.configurationChanged, false);
+  assert.deepEqual(docker.calls.map(c => c[0]), ['image', 'container']);
+});
+
+test('Windows plan stays offline and validates platform without CLI platform override', async () => {
+  let calls = 0;
+  const result = await runInstaller({ ...parseArgs([]), platform: 'win32' }, async () => { calls++; });
+  assert.equal(result.offline, true); assert.equal(calls, 0);
+  await assert.rejects(runInstaller({ ...windowsFresh(), platform: 'darwin' }), /unsupported-platform/);
+  await assert.rejects(runInstaller(windowsFresh({ dataDir: 'C:\\unsafe' })), /windows-requires-named-volumes/);
+  assert.throws(() => parseArgs(['--platform', 'win32']), /unknown-option/);
+  for (const flag of ['confirmInstall', 'authorized', 'injectionRisk']) {
+    await assert.rejects(runInstaller(windowsFresh({ [flag]: false }), async () => { throw new Error('never'); }));
+  }
+});
+
+test('Windows fresh seed uses private in-memory tar, random independent named volumes and Linux engine', async () => {
+  const options = windowsFresh({ start: true }), docker = windowsDocker(options);
+  const result = await runInstaller(options, docker.run);
+  assert.equal(result.created, true); assert.equal(result.id, ID); assert.equal(result.started, true); assert.equal(result.termsAccepted, false);
+  assert.deepEqual(docker.calls[0], ['info', '--format', '{{.OSType}}']);
+  assert.equal(docker.volumes.length, 3); assert.equal(new Set(docker.volumes.map(v => v.name)).size, 3);
+  for (const v of docker.volumes) assert.match(v.name, /^snowluma-[a-f0-9]{32}-(data|qq-config|qq-share)$/);
+  const create = docker.calls.find(c => c[0] === 'create').join(' ');
+  assert.equal(create.includes('type=bind'), false); assert.equal(create.includes('volume-nocopy'), true);
+  assert.equal(create.includes('--log-driver none'), true); assert.equal(create.includes('SNOWLUMA_HOOK_AUTOLOAD=0'), true);
+  assert.equal(docker.calls.some(c => ['exec', 'run', 'rm'].includes(c[0])), false);
+  assert.equal(docker.archives.length, 3);
+  const entries = tarEntries(docker.archives[0]);
+  assert.deepEqual(entries.map(e => e.name), ['data', 'data/config', 'data/config/onebot.json', 'data/config/runtime.json', 'data/config/vnc-password']);
+  for (const entry of entries) {
+    assert.equal(entry.uid, 59999); assert.equal(entry.gid, 59999);
+    assert.equal(entry.mode, entry.name === 'data' || entry.name === 'data/config' ? 0o700 : 0o600);
+  }
+  const cfg = JSON.parse(entries.find(e => e.name.endsWith('onebot.json')).content);
+  const runtime = JSON.parse(entries.find(e => e.name.endsWith('runtime.json')).content);
+  assert.equal(runtime.hookAutoLoad, false);
+  const tokens = [cfg.networks.httpServers[0].accessToken, cfg.networks.wsServers[0].accessToken];
+  assert.notEqual(tokens[0], tokens[1]);
+  for (const secret of [...tokens, entries.at(-1).content.trim()]) {
+    assert.equal(JSON.stringify(docker.calls).includes(secret), false);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+  assert.deepEqual(tarEntries(docker.archives[1]).map(e => e.name), ['.config']);
+  assert.deepEqual(tarEntries(docker.archives[2]).map(e => e.name), ['share']);
+  const lastCopies = docker.calls.filter(c => c[0] === 'cp');
+  assert.deepEqual(lastCopies, ['/app', '/app', '/app/.local'].map(target => ['cp', '--archive', '-', `${ID}:${target}`]));
+  assert.deepEqual(docker.calls.at(-1), ['start', ID]);
+  const again = windowsDocker(options); await runInstaller(options, again.run);
+  assert.notEqual(docker.volumes[0].nonce, again.volumes[0].nonce);
+});
+
+test('Windows refuses Windows containers before inspection, pull or mutation', async () => {
+  const options = windowsFresh({ pull: true, start: true }), docker = windowsDocker(options, { osType: 'windows' });
+  await assert.rejects(runInstaller(options, docker.run), /linux-container-engine-required/);
+  assert.equal(docker.calls.length, 1);
+});
+
+test('Windows volume attestation/copy/postcreate failures retain state and never start', async () => {
+  for (const failure of [{ collision: true }, { wrongVolume: true }, { forgedLabel: true }, { badMount: true }, { failCopy: true }]) {
+    const options = windowsFresh({ start: true }), docker = windowsDocker(options, failure);
+    await assert.rejects(runInstaller(options, docker.run));
+    assert.equal(docker.calls.some(c => c[0] === 'start'), false);
+    assert.equal(docker.calls.some(c => c.includes('rm') || c.includes('prune') || c.includes('--force')), false);
+  }
+  const options = windowsFresh({ pull: true }), docker = windowsDocker(options, { occupied: true });
+  await assert.rejects(runInstaller(options, docker.run), /container-already-exists/);
+  assert.equal(docker.calls.some(c => ['pull', 'create', 'volume'].includes(c[0])), false);
+});
+
+test('Windows named-volume adoption stays read-only, rejects daemon bind sources', async () => {
+  const options = { ...parseArgs(['--check', '--adopt-existing', '--image', PIN]), platform: 'win32' };
+  const docker = windowsDocker(options); const result = await runInstaller(options, docker.run);
+  assert.equal(result.readOnly, true);
+  assert.deepEqual(docker.calls.map(c => c[0]), ['info', 'image', 'container']);
+  const bind = { ...state(), mounts: state().mounts.map(m => ({ ...m, Type: 'bind', Source: '/srv/dedicated' })) };
+  await assert.rejects(runInstaller(options, async args => args[0] === 'info' ? 'linux' : args[0] === 'image' ? IMAGE_ID : inspect(bind)), /windows-requires-named-volumes/);
 });

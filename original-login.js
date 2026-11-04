@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { spawn } from 'node:child_process';
 import { createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
-import { command } from './runtime.js';
+import { dockerExecutable, DOCKER_ENDPOINTS } from './docker-prerequisites.js';
 
 const ORIGINAL_PATH = '/vnc.html?autoconnect=1&resize=scale';
 const MAX_PAGE_BYTES = 256 * 1024;
@@ -12,11 +12,11 @@ const MAX_ENV_BYTES = 64 * 1024;
 
 // Credential commands deliberately do not use runtime.command: it combines
 // stderr with stdout and includes that content in errors. Never log either pipe.
-function credentialCommand(bin, args, { signal, timeoutMs, maxOutputBytes }) {
+function credentialCommand(bin, args, { signal, timeoutMs, maxOutputBytes, env }) {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(cancelled()); return; }
     let child;
-    try { child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false }); }
+    try { child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: true, env }); }
     catch { reject(passwordUnavailable()); return; }
     const chunks = [];
     let size = 0, stderrSize = 0, settled = false;
@@ -165,9 +165,20 @@ async function probe(fetcher, port, signal) {
  * password() is a separate user-only credential operation; never call it from
  * status, discovery, redirect construction, logs, or a model tool.
  */
-export function createOriginalLogin({ mode, container, nativePort = 0, run, fetcher = fetch }) {
-  const targetRun = run || command;
+export function createOriginalLogin({ mode, container, nativePort = 0, platform = process.platform, run, fetcher = fetch }) {
+  const targetRun = run || credentialCommand;
   const passwordRun = run || credentialCommand;
+  const endpoint = DOCKER_ENDPOINTS[platform];
+  const commandEnv = { ...process.env };
+  for (const key of Object.keys(commandEnv)) if (/^DOCKER_/i.test(key)) delete commandEnv[key];
+  if (endpoint) commandEnv.DOCKER_HOST = endpoint;
+  // An explicit local endpoint overrides both saved contexts and inherited Docker
+  // settings. Resolve the executable on every action after Desktop installation.
+  const dockerArgs = args => {
+    if (!endpoint) throw unavailable();
+    return ['--host', endpoint, ...args];
+  };
+  const dockerBin = () => dockerExecutable({ platform, env: commandEnv });
   if (mode === 'docker' && (typeof container !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(container))) throw new Error('原版登录的容器名无效');
   if (mode === 'native' && (!Number.isInteger(nativePort) || nativePort < 0 || nativePort > 65535)) throw new Error('原版登录的原生端口无效');
   const native = mode === 'native' && nativePort !== 0;
@@ -183,7 +194,7 @@ export function createOriginalLogin({ mode, container, nativePort = 0, run, fetc
         const commandTimeout = new AbortController();
         timer = setTimeout(() => commandTimeout.abort(), 8000);
         const commandSignal = AbortSignal.any([active, commandTimeout.signal]);
-        const output = await until(Promise.resolve().then(() => targetRun('docker', ['port', container, '6081/tcp'], { timeoutMs: 8000, signal: commandSignal })), commandSignal);
+        const output = await until(Promise.resolve().then(() => targetRun(dockerBin(), dockerArgs(['port', container, '6081/tcp']), { timeoutMs: 8000, maxOutputBytes: 32768, signal: commandSignal, env: commandEnv })), commandSignal);
         clearTimeout(timer);
         port = publishedPort(output);
       }
@@ -209,9 +220,9 @@ export function createOriginalLogin({ mode, container, nativePort = 0, run, fetc
     try {
       let configured = null;
       if (!native) {
-        environment = await until(Promise.resolve().then(() => passwordRun('docker',
-          ['inspect', '--format', '{{json .Config.Env}}', container],
-          { timeoutMs: 8000, maxOutputBytes: MAX_ENV_BYTES, signal: commandSignal })), commandSignal);
+        environment = await until(Promise.resolve().then(() => passwordRun(dockerBin(),
+          dockerArgs(['inspect', '--format', '{{json .Config.Env}}', container]),
+          { timeoutMs: 8000, maxOutputBytes: MAX_ENV_BYTES, signal: commandSignal, env: commandEnv })), commandSignal);
         configured = effectivePassword(environment);
         if (Buffer.isBuffer(environment)) environment.fill(0);
         environment = null;
@@ -220,9 +231,9 @@ export function createOriginalLogin({ mode, container, nativePort = 0, run, fetc
       // Only these fixed credential sources are supported. Native never reads an
       // environment or a configurable file; both runners use bounded binary output
       // without a shell, logging, service startup, or remote configuration.
-      stored = await until(Promise.resolve().then(() => passwordRun(native ? 'head' : 'docker',
-        native ? ['-c', '8', '/var/lib/snowluma/.vnc/passwd'] : ['exec', container, 'head', '-c', '8', '/root/.vnc/passwd'],
-        { timeoutMs: 8000, maxOutputBytes: 8, signal: commandSignal })), commandSignal);
+      stored = await until(Promise.resolve().then(() => passwordRun(native ? 'head' : dockerBin(),
+        native ? ['-c', '8', '/var/lib/snowluma/.vnc/passwd'] : dockerArgs(['exec', container, 'head', '-c', '8', '/root/.vnc/passwd']),
+        { timeoutMs: 8000, maxOutputBytes: 8, signal: commandSignal, env: commandEnv })), commandSignal);
       if (commandSignal.aborted) throw cancelled();
       // Some original images generate the effective password file when the env
       // is unset/empty. Read that actual fixed source, never derive a default.

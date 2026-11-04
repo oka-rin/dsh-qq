@@ -7,6 +7,11 @@ import { registerLoginHttp } from '../login-http.js';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { Config } from '../index.js';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const endpoint = 'unix:///var/run/docker.sock';
+const localArgs = args => ['--host', endpoint, ...args];
 
 const path = '/vnc.html?autoconnect=1&resize=scale';
 const html = '<!DOCTYPE html><html><head><title>noVNC</title></head><body id="noVNC_container"></body></html>';
@@ -14,7 +19,7 @@ const page = (body = html, options = {}) => new Response(body, { status: 200, he
 function fixture(options = {}) {
   const calls = [], requests = [];
   const login = createOriginalLogin({
-    mode: 'docker', container: 'SnowLuma_1.test-2',
+    mode: 'docker', container: 'SnowLuma_1.test-2', platform: 'linux',
     run: async (...args) => { calls.push(args); return '0.0.0.0:6081\n[::]:6082\n'; },
     fetcher: async (...args) => { requests.push(args); return page(); },
     ...options,
@@ -27,7 +32,7 @@ test('discovers first existing Docker publication, then locally GET-probes noVNC
   assert.deepEqual(await f.login.target(), { port: 6081, path });
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0][0], 'docker');
-  assert.deepEqual(f.calls[0][1], ['port', 'SnowLuma_1.test-2', '6081/tcp']);
+  assert.deepEqual(f.calls[0][1], localArgs(['port', 'SnowLuma_1.test-2', '6081/tcp']));
   assert.equal(f.calls[0][2].timeoutMs, 8000);
   assert.ok(f.calls[0][2].signal instanceof AbortSignal);
   const [url, options] = f.requests[0];
@@ -169,17 +174,71 @@ function vncFile(value) {
 }
 function passwordFixture({ env = ['OTHER_SYNTHETIC=hidden', 'VNC_PASSWD=testpass'], file = vncFile('testpass'), run, ...options } = {}) {
   const calls = [];
-  const f = fixture({ run: run || (async (bin, args, opts) => { calls.push([bin, args, opts]); return args[0] === 'inspect' ? JSON.stringify(env) : Buffer.from(file); }), ...options });
+  const f = fixture({ run: run || (async (bin, args, opts) => { calls.push([bin, args, opts]); return args[2] === 'inspect' ? JSON.stringify(env) : Buffer.from(file); }), ...options });
   return { ...f, calls };
 }
+for (const [platform, host] of [['linux', endpoint], ['win32', 'npipe:////./pipe/dockerDesktopLinuxEngine']]) {
+  test(`${platform} pins every page and credential Docker command to the local engine, ignoring inherited context`, async t => {
+    for (const [key, value] of Object.entries({ DOCKER_HOST: 'tcp://attacker.invalid:2375', DOCKER_CONTEXT: 'remote', DOCKER_TLS_VERIFY: '1', DOCKER_CERT_PATH: '/private/cert', docker_config: '/private/config' })) {
+      const previous = process.env[key]; process.env[key] = value;
+      t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+    }
+    const calls = [];
+    const f = fixture({ platform, run: async (bin, args, options) => {
+      calls.push([bin, args, options]);
+      if (args[2] === 'port') return '127.0.0.1:26081';
+      if (args[2] === 'inspect') return '["VNC_PASSWD=testpass"]';
+      if (args[2] === 'exec') return vncFile('testpass');
+      throw new Error('unexpected Docker command');
+    } });
+    assert.deepEqual(await f.login.target(), { port: 26081, path });
+    assert.deepEqual(await f.login.password(), { ok: true, password: 'testpass' });
+    assert.deepEqual(calls.map(call => call[1]), [
+      ['--host', host, 'port', 'SnowLuma_1.test-2', '6081/tcp'],
+      ['--host', host, 'inspect', '--format', '{{json .Config.Env}}', 'SnowLuma_1.test-2'],
+      ['--host', host, 'exec', 'SnowLuma_1.test-2', 'head', '-c', '8', '/root/.vnc/passwd'],
+    ]);
+    for (const [bin, , options] of calls) {
+      assert.ok(bin === 'docker' || (platform === 'win32' && /[\\/]Docker[\\/]Docker[\\/]resources[\\/]bin[\\/]docker\.exe$/i.test(bin)));
+      assert.equal(options.env.DOCKER_HOST, host);
+      assert.deepEqual(Object.keys(options.env).filter(key => /^DOCKER_/i.test(key)), ['DOCKER_HOST']);
+      assert.ok(options.signal instanceof AbortSignal); assert.equal(options.timeoutMs, 8000);
+    }
+    assert.deepEqual(calls.map(call => call[2].maxOutputBytes), [32768, 65536, 8]);
+  });
+}
+test('unsupported Docker platforms fail before executing commands or probing', async () => {
+  const f = fixture({ platform: 'darwin' });
+  await assert.rejects(f.login.target(), /noVNC 尚未就绪/);
+  await assert.rejects(f.login.password(), /无法安全读取并核实/);
+  assert.deepEqual(f.calls, []); assert.deepEqual(f.requests, []);
+});
+test('bounded credential subprocess uses shell:false and the supplied safe environment on Windows too', async () => {
+  const source = fs.readFileSync(new URL('../original-login.js', import.meta.url), 'utf8');
+  const implementation = source.slice(source.indexOf('function credentialCommand('), source.indexOf('\nfunction effectivePassword('));
+  const calls = [], env = { Path: 'C:\\Program Files\\Docker', DOCKER_HOST: 'npipe:////./pipe/dockerDesktopLinuxEngine' };
+  const run = vm.runInNewContext(`(${implementation})`, { Buffer, setTimeout, clearTimeout,
+    cancelled: () => new Error('cancelled'), passwordUnavailable: () => new Error('unavailable'),
+    spawn: (bin, args, options) => {
+      calls.push([bin, args, options]);
+      const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+      queueMicrotask(() => { child.stdout.emit('data', Buffer.from('ok')); child.emit('close', 0); });
+      return child;
+    },
+  });
+  const args = ['--host', env.DOCKER_HOST, 'inspect'];
+  assert.equal((await run('C:\\Program Files\\Docker\\docker.exe', args, { signal: new AbortController().signal, timeoutMs: 8000, maxOutputBytes: 8, env })).toString(), 'ok');
+  assert.equal(calls[0][2].shell, false); assert.equal(calls[0][2].windowsHide, true);
+  assert.equal(calls[0][2].env, env); assert.equal(calls[0][1], args);
+});
 test('explicit password operation verifies original fixed password file with VNC DES key bit ordering', async () => {
   // Independently confirmed by x11vnc -storepasswd testpass on a temporary file.
   assert.equal(vncFile('testpass').toString('hex'), '87803c720bbb91d5');
   const f = passwordFixture();
   assert.deepEqual(await f.login.password(), { ok: true, password: 'testpass' });
   assert.equal(f.calls.length, 2);
-  assert.deepEqual(f.calls[0][1], ['inspect', '--format', '{{json .Config.Env}}', 'SnowLuma_1.test-2']);
-  assert.deepEqual(f.calls[1][1], ['exec', 'SnowLuma_1.test-2', 'head', '-c', '8', '/root/.vnc/passwd']);
+  assert.deepEqual(f.calls[0][1], localArgs(['inspect', '--format', '{{json .Config.Env}}', 'SnowLuma_1.test-2']));
+  assert.deepEqual(f.calls[1][1], localArgs(['exec', 'SnowLuma_1.test-2', 'head', '-c', '8', '/root/.vnc/passwd']));
   assert.deepEqual(f.calls.map(call => call[2].maxOutputBytes), [65536, 8]);
   assert.ok(f.calls.every(call => call[0] === 'docker' && call[2].timeoutMs === 8000 && call[2].signal instanceof AbortSignal));
   assert.deepEqual(f.requests, []);
@@ -203,10 +262,10 @@ for (const value of ['', 'bad\u0000pad', 'bad\npass', '\u007f']) test('fixed-fil
   const f = passwordFixture({ env: [], file: vncFile(value) }); await assert.rejects(f.login.password(), /无法安全读取并核实/);
 });
 for (const file of [Buffer.alloc(8), Buffer.alloc(7), Buffer.alloc(9), '87803c720bbb91d5']) test('unset env and corrupt fixed-file source fail closed without default', async () => {
-  const f = passwordFixture({ run: async (_bin, args) => args[0] === 'inspect' ? '[]' : file }); await assert.rejects(f.login.password(), /无法安全读取并核实/);
+  const f = passwordFixture({ run: async (_bin, args) => args[2] === 'inspect' ? '[]' : file }); await assert.rejects(f.login.password(), /无法安全读取并核实/);
 });
 for (const file of [Buffer.alloc(8), Buffer.alloc(7), Buffer.alloc(9), vncFile('changed'), '87803c720bbb91d5']) test('mismatched or invalid original password file never discloses env credential', async () => {
-  const f = passwordFixture({ run: async (_bin, args) => args[0] === 'inspect' ? '["VNC_PASSWD=testpass"]' : file });
+  const f = passwordFixture({ run: async (_bin, args) => args[2] === 'inspect' ? '["VNC_PASSWD=testpass"]' : file });
   await assert.rejects(f.login.password(), error => /无法安全读取并核实/.test(error.message) && !error.message.includes('testpass'));
 });
 for (const output of ['not JSON synthetic-secret', JSON.stringify(['VNC_PASSWD=testpass', 'OTHER=' + 'x'.repeat(65536)]), Buffer.alloc(65537)]) test('malformed/oversized environment output is sanitized', async () => {
@@ -215,7 +274,7 @@ for (const output of ['not JSON synthetic-secret', JSON.stringify(['VNC_PASSWD=t
 });
 test('both credential commands sanitize injected rejection including stdout, host path and other credentials', async () => {
   for (const failAt of ['inspect', 'exec']) {
-    const f = passwordFixture({ run: async (_bin, args) => { if (args[0] === failAt) throw new Error('testpass QQ_PASSWORD=synthetic-secret /root/private'); return '["VNC_PASSWD=testpass"]'; } });
+    const f = passwordFixture({ run: async (_bin, args) => { if (args[2] === failAt) throw new Error('testpass QQ_PASSWORD=synthetic-secret /root/private'); return '["VNC_PASSWD=testpass"]'; } });
     await assert.rejects(f.login.password(), error => /无法安全读取并核实/.test(error.message) && !/testpass|synthetic-secret|private/.test(error.message));
   }
 });
@@ -235,13 +294,13 @@ test('cancelled/disposed credential reads do not run, wait for or reveal late ba
 });
 test('credential deadline includes both reads and handles an injected runner ignoring abort', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] }); let signal;
-  const f = passwordFixture({ run: async (_bin, args, options) => { signal = options.signal; if (args[0] === 'inspect') return '["VNC_PASSWD=testpass"]'; return new Promise(() => {}); } });
+  const f = passwordFixture({ run: async (_bin, args, options) => { signal = options.signal; if (args[2] === 'inspect') return '["VNC_PASSWD=testpass"]'; return new Promise(() => {}); } });
   const result = f.login.password(); await setImmediate(); t.mock.timers.tick(8000);
   await assert.rejects(result, /无法安全读取并核实/); assert.equal(signal.aborted, true);
 });
 test('credential source buffers are cleared after success and parse failure', async () => {
   const environment = Buffer.from('["VNC_PASSWD=testpass"]'), file = vncFile('testpass');
-  const f = passwordFixture({ run: async (_bin, args) => args[0] === 'inspect' ? environment : file });
+  const f = passwordFixture({ run: async (_bin, args) => args[2] === 'inspect' ? environment : file });
   assert.equal((await f.login.password()).ok, true); assert.ok(environment.every(b => b === 0)); assert.ok(file.every(b => b === 0));
   const bad = Buffer.from('malformed private-secret');
   const broken = passwordFixture({ run: async () => bad });

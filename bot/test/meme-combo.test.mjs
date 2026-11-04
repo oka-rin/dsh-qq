@@ -78,6 +78,10 @@ test('回复里带 <meme>：先说话再补图；整条只有标记时只发图'
     assert.ok(secondSegs.some((s) => s.type === 'image'), '第二条是图');
     assert.ok(secondSegs.find((s) => s.type === 'image').data.file.startsWith('base64://'), '图片走 base64 段');
 
+    // Mock records the request before the HTTP response reaches OneBot.call().
+    // Wait for the bot's post-response history write, not just server receipt.
+    const historyDeadline = Date.now() + 8000;
+    while (!store.tail('group:123456', 8).some((r) => (r.text || '').startsWith('[表情')) && Date.now() < historyDeadline) await sleep(20);
     const rows = store.tail('group:123456', 8);
     assert.ok(rows.some((r) => (r.text || '').includes('行吧')), '历史里应有文字');
     assert.ok(rows.some((r) => (r.text || '').startsWith('[表情')), '历史里应有表情标注');
