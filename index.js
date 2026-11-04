@@ -581,7 +581,7 @@ export function apply(ctx, config = {}) {
 
   if (!['snowluma', 'napcat'].includes(cfg.gatewayBackend)) throw new Error('不支持的网关后端');
   const napcat = cfg.gatewayBackend === 'napcat';
-  const setup = createSetup({ configPath, gatewayBackend: cfg.gatewayBackend, nativeService: napcat ? cfg.napcatService : cfg.snowLumaService, nativeScope: napcat ? 'system' : cfg.snowLumaServiceScope });
+  const setup = createSetup({ configPath, gatewayBackend: cfg.gatewayBackend, gatewayMode: napcat ? 'native' : cfg.snowLumaMode, nativeService: napcat ? cfg.napcatService : cfg.snowLumaService, nativeScope: napcat ? 'system' : cfg.snowLumaServiceScope });
   const windowOptions = { mode: cfg.snowLumaMode, container: cfg.snowLumaContainer,
     display: cfg.snowLumaMode === 'docker' ? ':1' : cfg.snowLumaDisplay,
     xauthority: cfg.snowLumaMode === 'docker' ? '' : cfg.snowLumaXauthority };

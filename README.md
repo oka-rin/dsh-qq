@@ -2,7 +2,7 @@
 
 **让 DeepSeek Harness 接入你的 QQ：聊天、看图看视频、查记录、发消息，都在一个插件里。**
 
-[安装使用](#安装使用) · [原生安装与 Docker 迁移](./docs/native.md) · [高级配置](./docs/advanced.md) · [反馈问题](https://github.com/oka-rin/dsh-qq/issues)
+[安装使用](#安装使用) · [SnowLuma Docker 自动部署](./docs/docker.md) · [原生迁移](./docs/native.md) · [高级配置](./docs/advanced.md) · [反馈问题](https://github.com/oka-rin/dsh-qq/issues)
 
 ## 能做什么
 
@@ -24,7 +24,7 @@
 - **NapCat / SnowLuma / OneBot 后端**，拿到 HTTP、正向 WebSocket 地址和 Token。NapCat 可直接在官方 WebUI 扫码，不需要 VNC。详见 [NapCat 接入](./docs/napcat.md)。
 - **模型接口**：OpenAI 兼容的接口地址、模型名和 API Key。
 
-**没有 QQ 后端？** 新部署建议按 [NapCat 官方指南](https://napneko.github.io/guide/napcat)安装并开启 OneBot HTTP / 正向 WS，再按本仓库 [NapCat 接入步骤](./docs/napcat.md)连接。插件不捆绑后端或代替你同意 QQ / 上游条款。既有 SnowLuma 无需强制迁移；旧 [SnowLuma 安装脚本与迁移指南](./docs/native.md)保留兼容，但**不是 NapCat 安装器**。
+**没有 QQ 后端？** 可审阅并使用本仓库 [SnowLuma Docker 自动部署脚本](./docs/docker.md)：默认离线预览，明确确认后才创建或核对接管现有实例，不覆盖旧数据；登录仍由你在原版网页完成。插件不捆绑镜像、不隐式执行安装、不代替你取得上游部署授权或同意 QQ / 上游条款。NapCat 仍作为可选已有后端兼容，见 [NapCat 接入](./docs/napcat.md)。
 
 ### 2. 安装插件
 

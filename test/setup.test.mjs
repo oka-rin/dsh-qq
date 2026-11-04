@@ -31,6 +31,32 @@ test('setup status never exposes tokens/keys and does not execute deployment com
   assert.equal(status.current.hasToken, true); assert.equal(status.current.hasApiKey, true);
   assert.ok(!JSON.stringify(status).includes('secret')); assert.equal(commands, 0);
 });
+test('Docker setup guides existing containers without host QQ, Xvfb or systemd requirements', async t => {
+  const f = fixture(t); let commands = 0;
+  const status = await createSetup({ configPath: f.configPath, gatewayMode: 'docker', run: async () => { commands++; throw new Error('must not execute'); } }).status();
+  assert.equal(status.preferredMode, 'docker'); assert.equal(status.backend, 'snowluma');
+  assert.equal(status.native, undefined);
+  assert.equal(status.automaticInstall.available, false); assert.equal(status.automaticInstall.scriptAvailable, true);
+  assert.match(status.automaticInstall.guide, /docs\/docker\.md$/);
+  assert.match(status.automaticInstall.script, /scripts\/install-snowluma-docker\.mjs$/);
+  assert.equal(status.automaticInstall.planCommand, 'node scripts/install-snowluma-docker.mjs --plan');
+  assert.match(status.automaticInstall.reason, /不会隐式/);
+  assert.deepEqual(status.checks.map(check => check.id), ['platform', 'docker', 'ffmpeg']);
+  assert.doesNotMatch(JSON.stringify(status), /install-native|docs\/native|secret/);
+  assert.equal(commands, 0); assert.deepEqual(JSON.parse(fs.readFileSync(f.configPath)), f.initial);
+});
+test('NapCat remains native even if a SnowLuma Docker mode is supplied', async t => {
+  const f = fixture(t);
+  const status = await createSetup({ configPath: f.configPath, gatewayBackend: 'napcat', gatewayMode: 'docker' }).status();
+  assert.equal(status.preferredMode, 'native'); assert.equal(status.native.service, 'napcat.service');
+  assert.equal(status.automaticInstall.scriptAvailable, false);
+  assert.ok(status.checks.some(check => check.id === 'qq')); assert.ok(!status.checks.some(check => check.id === 'docker'));
+});
+test('plugin passes selected SnowLuma mode to setup without adding NapCat Docker', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /gatewayMode: napcat \? 'native' : cfg\.snowLumaMode/);
+  assert.doesNotMatch(source, /napcatMode|napcatContainer/);
+});
 test('connect probes both transports, preserves config and makes private backup', async t => {
   const f = fixture(t); let auth, target;
   class Capture extends Socket { constructor(u) { super(u); target = String(u); } }

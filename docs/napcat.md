@@ -24,7 +24,7 @@
 
 点「复制 NapCat 登录令牌」再打开官方 WebUI。复制操作只由已认证浏览器显式执行；不把令牌放 URL、日志、模型工具或状态结果中。浏览器拒绝剪贴板时可短时手动复制，离开或超时清除面板临时值。**它不是 QQ 密码，也不是 OneBot access token。**
 
-此插件不自动部署 WebUI，也不替你点击 QQ 登录确认。后端页面 200 / systemd active 不代表 QQ 在线。
+此插件不自动部署 NapCat WebUI，也不替你点击 QQ 登录确认。后端页面 200 / systemd active 不代表 QQ 在线。
 
 ## 3. 机器人连接
 

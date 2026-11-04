@@ -4,6 +4,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { registerLoginHttp } from '../login-http.js';
+import { createOriginalLogin, originalRedirect } from '../original-login.js';
 
 const root = '/dsh-qq/login';
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -38,7 +39,8 @@ async function fixture(t, options = {}) {
   };
   const api = registerLoginHttp({ ctx, login, desktop, originalLogin: options.originalLogin, napcatLogin: options.napcatLogin, readBody: () => { throw new Error('must not use unbounded shared reader'); }, assetPath: fileURLToPath(new URL('../desktop-client.js', import.meta.url)) });
   const server = http.createServer((req, res) => {
-    // Emulate a mount proxy stripping /dsh before the carrier sees requests.
+    // Emulate a TLS carrier and a mount proxy stripping /dsh before routing.
+    if (options.encrypted) req.socket.encrypted = true;
     req.url = req.url.replace(/^\/dsh(?=\/)/, '');
     const route = routes.get(new URL(req.url, 'http://localhost').pathname);
     if (!route) { res.writeHead(404); res.end(); return; }
@@ -236,6 +238,49 @@ test('Docker original entry keeps DSH auth, never starts substitute desktop or e
   assert.equal(hop.headers['cache-control'], 'no-store'); assert.doesNotMatch(hop.headers.location, /password|token/);
   assert.equal((await f.request('/original?url=http://evil.test')).status, 400);
   f.dispose(); assert.equal(disposed, 1);
+});
+
+test('mounted TLS GUI opens and copies from the same selected Docker container at its mapped HTTP port', async t => {
+  const commands = [], probes = [];
+  const container = 'Selected_QQ.test-2';
+  const original = createOriginalLogin({
+    mode: 'docker', container,
+    run: async (bin, args) => {
+      commands.push([bin, args]);
+      if (args[0] === 'port') return '[::]:16081\n127.0.0.1:26081\n';
+      if (args[0] === 'inspect') return JSON.stringify(['VNC_PASSWD=testpass', 'OTHER=synthetic-private']);
+      if (args[0] === 'exec') return Buffer.from('87803c720bbb91d5', 'hex');
+      throw new Error('unexpected lifecycle operation');
+    },
+    fetcher: async (url, options) => {
+      probes.push([url, options]);
+      return new Response('<html><title>noVNC</title></html>', { headers: { 'content-type': 'text/html' } });
+    },
+  });
+  const f = await fixture(t, { encrypted: true, publicHost: 'qq.example.test:3080', originalLogin: { ...original, redirect: originalRedirect } });
+  for (const options of [{ ...post(), auth: false }, post({}, { origin: 'https://attacker.test' }), post({ container: 'other' }), post({ path: '/tmp/other' })]) {
+    const denied = await f.request('/original/password', { ...options, prefix: '/dsh' });
+    assert.notEqual(denied.status, 200); assert.doesNotMatch(denied.text, /testpass|synthetic-private/);
+  }
+  assert.deepEqual(commands, []);
+  const ready = await f.request('/desktop/session', { ...post(), prefix: '/dsh' });
+  assert.equal(ready.status, 200); assert.equal(ready.json.url, '/dsh-qq/login/original');
+  const hop = await f.request('/original', { prefix: '/dsh' });
+  assert.equal(hop.status, 302);
+  assert.equal(hop.headers.location, 'http://qq.example.test:26081/vnc.html?autoconnect=1&resize=scale');
+  assert.equal(hop.headers['cache-control'], 'no-store');
+  assert.ok(!f.calls.some(([name]) => name === 'start'));
+  assert.deepEqual(commands, Array.from({ length: 2 }, () => ['docker', ['port', container, '6081/tcp']]));
+  assert.ok(probes.every(([url, options]) => url === 'http://127.0.0.1:26081/vnc.html' && options.redirect === 'error' && options.credentials === 'omit'));
+  assert.doesNotMatch(JSON.stringify([ready, hop]), /testpass|synthetic-private/);
+  const copied = await f.request('/original/password', { ...post(), prefix: '/dsh' });
+  assert.equal(copied.status, 200); assert.deepEqual(copied.json, { ok: true, password: 'testpass' });
+  assert.equal(copied.headers['cache-control'], 'no-store'); assert.equal(copied.headers.location, undefined);
+  assert.deepEqual(commands.slice(2), [
+    ['docker', ['inspect', '--format', '{{json .Config.Env}}', container]],
+    ['docker', ['exec', container, 'head', '-c', '8', '/root/.vnc/passwd']],
+  ]);
+  assert.doesNotMatch(copied.text, /synthetic-private|root\/\.vnc/);
 });
 
 test('browser-only password POST authenticates, checks mutations, bounds JSON and projects only verified credential', async t => {

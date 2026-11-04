@@ -36,7 +36,7 @@ export async function nativeStatus(service, scope, run = command) {
 }
 
 /** Read-only preparation and explicit connection of an operator-installed original gateway. */
-export function createSetup({ configPath, gatewayBackend = 'snowluma', nativeService = gatewayBackend === 'napcat' ? 'napcat.service' : 'snowluma.target', nativeScope = 'system', run = command, fetcher = fetch, Socket = WebSocket }) {
+export function createSetup({ configPath, gatewayBackend = 'snowluma', gatewayMode = 'native', nativeService = gatewayBackend === 'napcat' ? 'napcat.service' : 'snowluma.target', nativeScope = 'system', run = command, fetcher = fetch, Socket = WebSocket }) {
   const read = () => JSON.parse(fs.readFileSync(configPath, 'utf8'));
   async function check(input = {}) {
     const current = read().onebot || {};
@@ -115,14 +115,15 @@ export function createSetup({ configPath, gatewayBackend = 'snowluma', nativeSer
     try { envKey = fs.readFileSync(path.join(path.dirname(configPath), '.env'), 'utf8').split('\n').some(line => { const match = line.trim().match(/^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/); return match?.[1] === envName && Boolean(match[2].replace(/^['\"]|['\"]$/g, '').trim()); }); } catch {}
     const qqPath = (gatewayBackend === 'napcat' ? ['/opt/QQ/qq'] : ['/opt/QQ/qq', '/opt/snowluma/qq/qq']).find(file => fs.existsSync(file));
     const qq = Boolean(qqPath);
-    return { ok: true, backend: gatewayBackend, preferredMode: 'native', host: { platform: process.platform, arch: process.arch, node: process.version },
+    const docker = gatewayBackend === 'snowluma' && gatewayMode === 'docker';
+    return { ok: true, backend: gatewayBackend, preferredMode: docker ? 'docker' : 'native', host: { platform: process.platform, arch: process.arch, node: process.version },
       current: { httpUrl: c.onebot?.httpUrl || '', wsUrl: c.onebot?.wsUrl || '', hasToken: Boolean(c.onebot?.accessToken || c.onebot?.wsAccessToken), model: c.llm?.models?.chat || c.llm?.model || '', baseUrl: c.llm?.baseUrl || '', hasApiKey: Boolean(c.llm?.apiKey || process.env[envName] || envKey) },
-      checks: [ { id: 'platform', label: 'Linux 原生运行环境', ok: process.platform === 'linux', detail: `${os.type()} ${process.arch}` },
-        { id: 'qq', label: '原版 Linux QQ', ok: qq, detail: qq ? `${qqPath} 已存在；仍需验证能启动和登录` : gatewayBackend === 'napcat' ? '未检测到 /opt/QQ/qq；请由管理员确认 NapCat 配套 Linux QQ 安装路径' : '未检测到 /opt/QQ/qq 或 /opt/snowluma/qq/qq；可按原生安装指南准备' },
-        ...(gatewayBackend === 'napcat' ? [] : [{ id: 'display', label: '桌面 / 无头扫码环境', ok: Boolean(process.env.DISPLAY) || xvfb, detail: process.env.DISPLAY ? '有 DISPLAY；仍需人工确认能显示 QQ' : xvfb ? 'Xvfb 命令存在；仍需配置并启动桌面和扫码' : '未检测到桌面；服务器需 Xvfb + 窗口管理器 + 受保护的远程桌面' }]),
+      checks: [ { id: 'platform', label: docker ? 'Docker 宿主运行环境' : 'Linux 原生运行环境', ok: process.platform === 'linux', detail: `${os.type()} ${process.arch}` },
+        ...(docker ? [{ id: 'docker', label: 'Docker 管理命令', ok: exists('docker'), detail: 'QQ 和扫码桌面运行于所选已有容器内；请在运维核查容器状态，不要求宿主安装 QQ 或 Xvfb' }] : [{ id: 'qq', label: '原版 Linux QQ', ok: qq, detail: qq ? `${qqPath} 已存在；仍需验证能启动和登录` : gatewayBackend === 'napcat' ? '未检测到 /opt/QQ/qq；请由管理员确认 NapCat 配套 Linux QQ 安装路径' : '未检测到 /opt/QQ/qq 或 /opt/snowluma/qq/qq；可按原生安装指南准备' },
+        ...(gatewayBackend === 'napcat' ? [] : [{ id: 'display', label: '桌面 / 无头扫码环境', ok: Boolean(process.env.DISPLAY) || xvfb, detail: process.env.DISPLAY ? '有 DISPLAY；仍需人工确认能显示 QQ' : xvfb ? 'Xvfb 命令存在；仍需配置并启动桌面和扫码' : '未检测到桌面；服务器需 Xvfb + 窗口管理器 + 受保护的远程桌面' }])]),
         { id: 'ffmpeg', label: '动图 / 视频抽帧', ok: ffmpeg, detail: ffmpeg ? 'ffmpeg 可用' : '缺少 ffmpeg；静态识图不受影响' } ],
-      links: gatewayBackend === 'napcat' ? { release: 'https://github.com/NapNeko/NapCatQQ/releases', manual: 'https://napneko.github.io/', qq: UPSTREAM.qq } : UPSTREAM, native: { service: nativeService, scope: nativeScope },
-      automaticInstall: gatewayBackend === 'napcat' ? { available: false, scriptAvailable: false, reason: '由宿主管理员安装 NapCat 和 Linux QQ；本页面仅连接已安装的服务，扫码使用 NapCat 官方 WebUI。' } : { available: false, scriptAvailable: true, guide: 'https://github.com/oka-rin/dsh-qq/blob/main/docs/native.md', script: 'https://github.com/oka-rin/dsh-qq/blob/main/scripts/install-native.sh', planCommand: 'bash scripts/install-native.sh --plan', reason: '提供宿主机管理员主动执行的可审查原生安装脚本；网页不会代运行 sudo、接受上游协议、扫码或停用 Docker。先预览计划并阅读上游条款，再按指南明确确认安装。' } };
+      links: gatewayBackend === 'napcat' ? { release: 'https://github.com/NapNeko/NapCatQQ/releases', manual: 'https://napneko.github.io/', qq: UPSTREAM.qq } : UPSTREAM, ...(docker ? {} : { native: { service: nativeService, scope: nativeScope } }),
+      automaticInstall: gatewayBackend === 'napcat' ? { available: false, scriptAvailable: false, reason: '由宿主管理员安装 NapCat 和 Linux QQ；本页面仅连接已安装的服务，扫码使用 NapCat 官方 WebUI。' } : docker ? { available: false, scriptAvailable: true, guide: 'https://github.com/oka-rin/dsh-qq/blob/main/docs/docker.md', script: 'https://github.com/oka-rin/dsh-qq/blob/main/scripts/install-snowluma-docker.mjs', planCommand: 'node scripts/install-snowluma-docker.mjs --plan', reason: '仅连接和管理管理员指定的已有 SnowLuma Docker 容器；网页不会隐式创建容器、拉取镜像、执行部署或接受上游协议。需要部署时，先预览可审查脚本的计划并按 Docker 指南明确确认。' } : { available: false, scriptAvailable: true, guide: 'https://github.com/oka-rin/dsh-qq/blob/main/docs/native.md', script: 'https://github.com/oka-rin/dsh-qq/blob/main/scripts/install-native.sh', planCommand: 'bash scripts/install-native.sh --plan', reason: '提供宿主机管理员主动执行的可审查原生安装脚本；网页不会代运行 sudo、接受上游协议、扫码或停用 Docker。先预览计划并阅读上游条款，再按指南明确确认安装。' } };
   }
   return { status, check, connect };
 }

@@ -111,13 +111,19 @@ function publishedPort(output) {
   if (typeof output !== 'string' && !Buffer.isBuffer(output)) throw unavailable();
   const text = output.toString();
   if (text.length > 32768) throw unavailable();
-  const first = text.trim().split(/\r?\n/, 1)[0];
-  const binding = /^(\[[0-9a-fA-F:.]+\]|[0-9a-fA-F:.]+):([0-9]{1,5})$/.exec(first);
-  if (!binding) throw unavailable();
-  const host = binding[1].startsWith('[') ? binding[1].slice(1, -1) : binding[1];
-  const port = portNumber(binding[2]);
-  if (!isIP(host) || !port) throw unavailable();
-  return port;
+  let reachablePort;
+  for (const line of text.trim().split(/\r?\n/)) {
+    const binding = /^(\[[0-9a-fA-F:.]+\]|[0-9a-fA-F:.]+):([0-9]{1,5})$/.exec(line);
+    if (!binding) throw unavailable();
+    const host = binding[1].startsWith('[') ? binding[1].slice(1, -1) : binding[1];
+    const port = portNumber(binding[2]);
+    if (!isIP(host) || !port) throw unavailable();
+    // Discovery probes IPv4 loopback only. Do not mistake an unrelated listener
+    // there for a Docker publication bound only to another interface or IPv6.
+    if (reachablePort === undefined && (host === '127.0.0.1' || host === '0.0.0.0')) reachablePort = port;
+  }
+  if (reachablePort === undefined) throw unavailable();
+  return reachablePort;
 }
 
 async function probe(fetcher, port, signal) {
@@ -249,7 +255,8 @@ export function originalRedirect(req, target) {
   }
   if (!target || !Number.isInteger(target.port) || !portNumber(String(target.port)) || target.path !== ORIGINAL_PATH) throw new Error('原版登录目标无效');
   let url;
-  try { url = new URL(`${req.socket?.encrypted ? 'https' : 'http'}://${host}`); }
+  // target() verifies plain HTTP; GUI TLS does not enable TLS on the noVNC port.
+  try { url = new URL(`http://${host}`); }
   catch { throw new Error('原版登录请求 Host 无效'); }
   if (!url.hostname || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('原版登录请求 Host 无效');
   url.port = String(target.port);

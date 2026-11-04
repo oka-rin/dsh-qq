@@ -40,7 +40,7 @@ test('discovers first existing Docker publication, then locally GET-probes noVNC
   assert.ok(options.signal instanceof AbortSignal);
 });
 
-for (const [binding, port] of [['127.0.0.1:1', 1], ['0.0.0.0:65535', 65535], ['[::]:16081', 16081], [':::6081', 6081], ['[::1]:6081', 6081]]) {
+for (const [binding, port] of [['127.0.0.1:1', 1], ['0.0.0.0:65535', 65535], ['[::]:16081\n127.0.0.1:16082', 16082], ['192.0.2.10:6081\n0.0.0.0:16081', 16081]]) {
   test(`accepts Docker host binding ${binding} but probes only IPv4 loopback`, async () => {
     const f = fixture({ run: async () => binding });
     assert.deepEqual(await f.login.target(), { port, path });
@@ -48,7 +48,7 @@ for (const [binding, port] of [['127.0.0.1:1', 1], ['0.0.0.0:65535', 65535], ['[
   });
 }
 
-for (const output of ['', '6081', '127.0.0.1:0', '127.0.0.1:65536', '127.0.0.1:-1', '127.0.0.1:1x', 'evil.example:6081', 'http://127.0.0.1:6081', '127.0.0.1:6081/vnc.html', '[broken]:6081', 'not a binding\n0.0.0.0:6081', '0.0.0.0:6081\n' + 'x'.repeat(32769)]) {
+for (const output of ['[::]:16081', ':::6081', '[::1]:6081', '192.0.2.10:6081', '[::1]:6081\n192.0.2.10:6082', '', '6081', '127.0.0.1:0', '127.0.0.1:65536', '127.0.0.1:-1', '127.0.0.1:1x', 'evil.example:6081', 'http://127.0.0.1:6081', '127.0.0.1:6081/vnc.html', '[broken]:6081', 'not a binding\n0.0.0.0:6081', '0.0.0.0:6081\n' + 'x'.repeat(32769)]) {
   test(`rejects invalid Docker publication ${output.slice(0, 45)}`, async () => {
     const f = fixture({ run: async () => output });
     await assert.rejects(f.login.target(), /noVNC 尚未就绪/);
@@ -386,13 +386,13 @@ for (const [host, expected] of [
   ['[2001:db8::1]:3080', '[2001:db8::1]:6081'], ['[::1]', '[::1]:6081'],
 ]) test(`redirect keeps request hostname ${host} and changes only port/path`, () => {
   assert.equal(originalRedirect(req(host), { port: 6081, path }), `http://${expected}${path}`);
-  assert.equal(originalRedirect(req(host, true), { port: 6081, path }), `https://${expected}${path}`);
+  assert.equal(originalRedirect(req(host, true), { port: 6081, path }), `http://${expected}${path}`);
 });
 
-test('redirect protocol derives only from socket encryption, never proxy headers or origin', () => {
+test('redirect uses verified HTTP even when GUI has TLS, never proxy headers or origin', () => {
   const headers = { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'attacker.test', forwarded: 'proto=https;host=attacker.test', origin: 'https://attacker.test' };
   assert.equal(originalRedirect(req('qq.test:3080', false, headers), { port: 6081, path }), `http://qq.test:6081${path}`);
-  assert.equal(originalRedirect(req('qq.test:3080', true, { 'x-forwarded-proto': 'http' }), { port: 6081, path }), `https://qq.test:6081${path}`);
+  assert.equal(originalRedirect(req('qq.test:3080', true, { 'x-forwarded-proto': 'http' }), { port: 6081, path }), `http://qq.test:6081${path}`);
 });
 
 for (const host of [undefined, null, [], ['qq.test'], '', ' qq.test', 'qq.test ', 'qq.test\r\nX: 1', 'qq.test\t', 'qq.test,evil.test', 'qq.test/evil', 'qq.test\\evil', 'qq.test?x=1', 'qq.test#x', 'user@qq.test', 'http://qq.test', '//qq.test', 'qq.test:', 'qq.test:0', 'qq.test:65536', 'qq.test:-1', 'qq.test:abc', '::1:3080', '[::1', '[:::1]:3080', '[::1]:80:90', 'bad..test', '-bad.test', 'bad-.test', '.test', 'a'.repeat(64) + '.test']) {
