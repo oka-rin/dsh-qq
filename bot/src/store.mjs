@@ -133,8 +133,14 @@ export class Store {
   }
 
   setPersona(persona) {
+    const previous = this.state.persona;
     this.state.persona = persona || null;
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.state.persona = previous;
+      throw error;
+    }
     return this.state.persona;
   }
 

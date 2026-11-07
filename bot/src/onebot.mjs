@@ -81,12 +81,16 @@ export class OneBot {
       try {
         envelope = JSON.parse(body);
       } catch {
+        this.state.http = 'error';
+        this.state.lastError = `HTTP ${res.status} 返回的不是 JSON`;
         throw new OneBotError(action, {
           message: `HTTP ${res.status} 返回的不是 JSON：${body.slice(0, 200)}`,
           response: body,
         });
       }
       if (!res.ok) {
+        this.state.http = 'error';
+        this.state.lastError = `HTTP ${res.status}`;
         throw new OneBotError(action, {
           message: `HTTP ${res.status}`,
           retcode: envelope?.retcode,
@@ -119,12 +123,28 @@ export class OneBot {
     }
   }
 
-  async loginInfo() {
-    const data = await this.call('get_login_info');
-    this.state.selfId = String(data?.user_id ?? data?.uin ?? this.selfId ?? '');
-    this.state.nickname = data?.nickname ?? '';
-    this.selfId = this.state.selfId;
-    return data;
+  async loginInfo(options = {}) {
+    const data = await this.call('get_login_info', {}, options);
+    const selfId = String(data?.user_id ?? data?.uin ?? '');
+    if (!/^\d+$/.test(selfId) || !data || typeof data.nickname !== 'string') {
+      throw new OneBotError('get_login_info', { message: '登录信息缺少有效账号或昵称' });
+    }
+    // Some gateways cache get_login_info for the entire QQ session. Query the
+    // actual self profile without cache rather than re-labelling that as live.
+    this.state.selfId = selfId;
+    this.selfId = selfId;
+    try {
+      const profile = await this.call('get_stranger_info', { user_id: Number(selfId), no_cache: true }, options);
+      if (typeof profile?.nickname !== 'string' || !profile.nickname.trim() || String(profile?.user_id ?? selfId) !== selfId) {
+        throw new OneBotError('get_stranger_info', { message: '自身资料缺少有效昵称或账号不匹配' });
+      }
+      this.state.nickname = profile.nickname;
+      return { ...data, nickname: profile.nickname, nicknameSource: 'profile' };
+    } catch (err) {
+      // Nickname freshness must not block message handling or lose a valid QQ id.
+      this.state.nickname = this.state.nickname || data.nickname;
+      return { ...data, nickname: this.state.nickname, nicknameSource: 'cache', nicknameError: err?.message || String(err) };
+    }
   }
 
   /* ----------------------------------------------------------------- WS */

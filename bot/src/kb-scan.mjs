@@ -152,7 +152,7 @@ export async function scanMemes({ brain, kb, log, queries = SEED_QUERIES, perSou
       const material = titles.map((t, i) => `${i + 1}. ${t.title}`).join('\n');
       const prompt = `下面是今天各平台的热搜词。挑出其中真正是「梗 / 网络用语 / 圈内黑话 / 名场面台词」的，给我解释。不是梗的（新闻事件、人名、比赛）直接跳过。\n\n已有梗（不要重复）：${[...known].slice(0, 60).join('、') || '（空）'}\n\n热榜：\n${material}`;
       try {
-        const text = await brain.complete({ system: SYSTEM, prompt, maxChars: 1600 });
+        const text = await brain.complete({ system: SYSTEM, prompt, maxChars: 1600, purpose: 'background' });
         const rows = parseJsonArray(text);
         if (rows.length) {
           const res = kb.addMany(rows.map((r) => ({ ...r, source: '热榜' })));
@@ -182,7 +182,7 @@ export async function scanMemes({ brain, kb, log, queries = SEED_QUERIES, perSou
     const prompt = `查询：${query}\n\n已有梗（不要重复）：${[...known].slice(0, 60).join('、') || '（空）'}\n\n搜索结果：\n${material}`;
     let text;
     try {
-      text = await brain.complete({ system: SYSTEM, prompt, maxChars: 1600 });
+      text = await brain.complete({ system: SYSTEM, prompt, maxChars: 1600, purpose: 'background' });
     } catch (err) {
       log?.warn?.(`抽取出错：${err.message}`);
       continue;

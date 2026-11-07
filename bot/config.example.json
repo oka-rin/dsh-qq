@@ -7,28 +7,54 @@
     "wsAccessToken": "",
     "selfId": 0
   },
-  "control": { "host": "127.0.0.1", "port": 8787, "token": "" },
-  "storage": { "dataDir": "./data" },
+  "control": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "token": ""
+  },
+  "storage": {
+    "dataDir": "./data"
+  },
   "llm": {
     "mode": "api",
     "baseUrl": "https://api.example.com/v1",
     "model": "",
     "apiKeyEnv": "QQ_LLM_API_KEY",
     "apiKey": "",
-    "models": { "chat": "", "agent": "" },
+    "models": {
+      "chat": "",
+      "agent": ""
+    },
+    "reasoningEffort": "",
+    "reasoningEfforts": {
+      "chat": "",
+      "agent": "",
+      "background": ""
+    },
     "temperature": 1,
-    "temperatures": { "chat": 1, "agent": 0.7, "background": 0.6 },
+    "temperatures": {
+      "chat": 1,
+      "agent": 0.7,
+      "background": 0.6
+    },
     "maxTokens": 400,
     "timeoutMs": 60000,
     "retryDelayMs": 1000,
-    "background": { "baseUrl": "", "model": "", "keyEnv": "", "apiKey": "" }
+    "background": {
+      "baseUrl": "",
+      "model": "",
+      "keyEnv": "",
+      "apiKey": ""
+    }
   },
   "persona": {
     "name": "QQ 机器人",
     "identity": "一个友好、诚实的 QQ 机器人",
     "style": "简短、自然；根据问题需要展开；不编造事实。",
     "likes": [],
-    "rules": ["尊重隐私；不刷屏；不冒充真人；不确定时说明。"],
+    "rules": [
+      "尊重隐私；不刷屏；不冒充真人；不确定时说明。"
+    ],
     "source": "",
     "systemPrompt": ""
   },
@@ -39,11 +65,25 @@
     "replyOnReplyToMe": true,
     "keywordTriggers": [],
     "aiDecide": false,
-    "aiDecideMandatory": ["mention", "reply", "private"],
+    "aiDecideMandatory": [
+      "mention",
+      "reply",
+      "private"
+    ],
     "followUpWindowMs": 120000,
     "followUpWithoutAt": false,
-    "randomInterject": { "chance": 0, "minGapMs": 600000, "minMessagesSeen": 6 },
-    "proactiveInterject": { "enabled": false, "chance": 0, "everyMinutes": 30, "groups": [], "backoffQuiet": true },
+    "randomInterject": {
+      "chance": 0,
+      "minGapMs": 600000,
+      "minMessagesSeen": 6
+    },
+    "proactiveInterject": {
+      "enabled": false,
+      "chance": 0,
+      "everyMinutes": 30,
+      "groups": [],
+      "backoffQuiet": true
+    },
     "ignoreSelf": true,
     "whitelistGroups": [],
     "blacklistGroups": [],
@@ -57,16 +97,23 @@
     "historyTurns": 24,
     "historyChars": 6000,
     "maxReplyChars": 300,
-    "splitReplies": { "enabled": true, "maxLen": 60, "pauseMs": 900 },
+    "splitReplies": {
+      "enabled": true,
+      "maxLen": 60,
+      "pauseMs": 900
+    },
     "recentSelfEcho": 3,
     "dedupeSelf": true,
     "dedupeThreshold": 0.8,
     "vision": {
       "enabled": false,
       "maxImages": 3,
-      "maxBytes": 8000000,
-      "timeoutMs": 12000,
-      "gif": { "enabled": false, "maxFrames": 3 },
+      "maxBytes": 20000000,
+      "timeoutMs": 30000,
+      "gif": {
+        "enabled": false,
+        "maxFrames": 3
+      },
       "video": {
         "enabled": false,
         "maxVideos": 1,
@@ -79,13 +126,36 @@
         "followUp": false,
         "followUpMs": 120000
       },
-      "forward": { "enabled": false, "maxNodes": 12, "maxChars": 1200, "timeoutMs": 4000 },
+      "forward": {
+        "enabled": false,
+        "maxNodes": 12,
+        "maxChars": 1200,
+        "timeoutMs": 4000
+      },
       "totalFrames": 8
     },
-    "webSearch": { "enabled": false, "timeoutMs": 4000, "maxResults": 4 },
-    "draw": { "enabled": false, "maxPerDay": 3, "minIntervalMs": 60000, "size": "1024x1024" },
-    "memeCollect": { "enabled": false, "maxPerDay": 8, "minIntervalMs": 30000, "maxBytes": 8000000, "allImages": false },
-    "people": { "rosterChars": 1400, "maxFacts": 6 },
+    "webSearch": {
+      "enabled": false,
+      "timeoutMs": 4000,
+      "maxResults": 4
+    },
+    "draw": {
+      "enabled": false,
+      "maxPerDay": 3,
+      "minIntervalMs": 60000,
+      "size": "1024x1024"
+    },
+    "memeCollect": {
+      "enabled": false,
+      "maxPerDay": 8,
+      "minIntervalMs": 30000,
+      "maxBytes": 8000000,
+      "allImages": false
+    },
+    "people": {
+      "rosterChars": 1400,
+      "maxFacts": 6
+    },
     "qzone": {
       "enabled": false,
       "alwaysReply": false,
@@ -93,7 +163,9 @@
       "replyPerDay": 6,
       "commentPerDay": 2,
       "minGapMs": 1800000,
-      "quietHours": ["23:30-08:30"],
+      "quietHours": [
+        "23:30-08:30"
+      ],
       "dryRun": true
     },
     "learn": {
@@ -102,6 +174,7 @@
       "minLines": 20,
       "budget": 520,
       "maxNotes": 600,
+      "personaEvolve": true,
       "embedding": {
         "enabled": false,
         "baseUrl": "https://api.example.com/v1",
@@ -123,7 +196,33 @@
     "keyEnv": "QQ_IMAGE_API_KEY",
     "apiKey": "",
     "timeoutMs": 240000,
-    "promptBrain": { "enabled": false, "model": "", "purpose": "chat", "timeoutMs": 15000, "maxChars": 500, "repair": true }
+    "promptBrain": {
+      "enabled": false,
+      "model": "",
+      "purpose": "chat",
+      "timeoutMs": 15000,
+      "maxChars": 500,
+      "repair": true
+    }
+  },
+  "social": {
+    "enabled": true,
+    "bilibili": {
+      "enabled": true,
+      "cookie": ""
+    },
+    "interests": [],
+    "everyMinutes": 30,
+    "maxAgeHours": 72,
+    "maxCommentsRead": 12,
+    "commentPerDay": 12,
+    "likePerDay": 32,
+    "learnFeed": true,
+    "minGapMs": 900000,
+    "quietHours": [
+      "23:30-08:30"
+    ],
+    "dryRun": false
   },
   "agent": {
     "enabled": false,
@@ -132,15 +231,33 @@
     "maxPerDay": 8,
     "minPerDay": 0,
     "minGapMs": 1800000,
-    "group": { "maxPerDay": 8, "minPerDay": 0, "minGapMs": 1800000 },
-    "private": { "maxPerDay": 0, "minPerDay": 0, "minGapMs": 1800000 },
-    "quietHours": ["23:00-08:00"],
+    "group": {
+      "maxPerDay": 8,
+      "minPerDay": 0,
+      "minGapMs": 1800000
+    },
+    "private": {
+      "maxPerDay": 0,
+      "minPerDay": 0,
+      "minGapMs": 1800000
+    },
+    "quietHours": [
+      "23:00-08:00"
+    ],
     "groups": [],
     "targets": [],
     "interests": [],
     "interestGroups": [],
-    "shareStyleWeights": { "talk": 1, "link": 1, "meme": 1 },
-    "mediaStyleWeights": { "picture": 1, "video": 0, "talk": 1 },
+    "shareStyleWeights": {
+      "talk": 1,
+      "link": 1,
+      "meme": 1
+    },
+    "mediaStyleWeights": {
+      "picture": 1,
+      "video": 0,
+      "talk": 1
+    },
     "shareEveryHours": 6,
     "qzoneEveryHours": 24,
     "maxSteps": 4,
@@ -166,7 +283,9 @@
     "minItems": 1,
     "maxPerDay": 3,
     "minGroupIdleMs": 600000,
-    "quietHours": ["23:00-08:00"],
+    "quietHours": [
+      "23:00-08:00"
+    ],
     "chance": 0,
     "dryRun": true
   },
@@ -183,6 +302,12 @@
     "dryRun": true,
     "notBeforeDate": ""
   },
-  "memory": { "everyHours": 6, "minNewLines": 20 },
-  "people": { "everyMessages": 20, "minGapMs": 3600000 }
+  "memory": {
+    "everyHours": 6,
+    "minNewLines": 20
+  },
+  "people": {
+    "everyMessages": 20,
+    "minGapMs": 3600000
+  }
 }

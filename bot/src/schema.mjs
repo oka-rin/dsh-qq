@@ -7,6 +7,8 @@
 //       / json 结构化数据（数组或对象，直接编辑 JSON）/ secret 密钥（只显示是否已设置）
 //       / select 下拉（配 options）
 
+import { REASONING_OPTIONS } from './reasoning.mjs';
+
 export const CONFIG_SCHEMA = [
   {
     id: 'onebot',
@@ -37,6 +39,13 @@ export const CONFIG_SCHEMA = [
       { path: 'llm.model', label: '默认模型', type: 'text' },
       { path: 'llm.models.chat', label: '聊天档模型', type: 'text' },
       { path: 'llm.models.agent', label: '主动档模型', type: 'text' },
+      ...[
+        ['llm.reasoningEffort', '默认推理档位'],
+        ['llm.reasoningEfforts.chat', '聊天推理档位'],
+        ['llm.reasoningEfforts.agent', '决策推理档位'],
+        ['llm.reasoningEfforts.background', '后台推理档位'],
+      ].map(([path, label]) => ({ path, label, type: 'select', options: REASONING_OPTIONS,
+        hint: '默认不传 reasoning_effort；分用途默认跟随上级。高档更慢且可能增加费用；不支持的模型可能报错，不会偷偷降档。' })),
       { path: 'llm.temperature', label: '默认温度', type: 'number', min: 0, max: 2, step: 0.05 },
       { path: 'llm.temperatures.chat', label: '聊天温度', type: 'number', min: 0, max: 2, step: 0.05 },
       { path: 'llm.temperatures.agent', label: '主动温度', type: 'number', min: 0, max: 2, step: 0.05 },
@@ -63,6 +72,7 @@ export const CONFIG_SCHEMA = [
       { path: 'chat.learn.embedding.timeoutMs', label: '向量超时（毫秒）', type: 'number', min: 1000, max: 120000, step: 1000 },
       { path: 'chat.learn.embedding.keyEnv', label: '向量密钥环境变量', type: 'text' },
       { path: 'chat.learn.embedding.apiKey', label: '向量密钥', type: 'secret' },
+      { path: 'chat.learn.personaEvolve', label: '允许它自己微调人格', type: 'bool', hint: '蒸馏后只往说话风格/行为规矩里追加，留历史可回滚；名字和整段系统提示词不碰' },
     ],
   },
   {
@@ -179,6 +189,31 @@ export const CONFIG_SCHEMA = [
       { path: 'chat.learn.minLines', label: '至少攒多少条才学', type: 'number', min: 1, max: 200 },
       { path: 'chat.learn.budget', label: '回话时带多少字笔记', type: 'number', min: 0, max: 4000, step: 20 },
       { path: 'chat.learn.maxNotes', label: '笔记上限', type: 'number', min: 50, max: 20000, step: 50 },
+    ],
+  },
+  {
+    id: 'social',
+    title: '视频社交',
+    note: '自己去 B站 刷热门、关注动态和兴趣搜索，读评论区，觉得有话可说才点赞或评论。扫码登录后才能点赞/评论。',
+    fields: [
+      { path: 'social.enabled', label: '总开关', type: 'bool' },
+      { path: 'social.bilibili.enabled', label: '刷 B站', type: 'bool' },
+      {
+        path: 'social.bilibili.cookie',
+        label: 'B站登录 Cookie',
+        type: 'textarea',
+        hint: '一般不用手填：让它扫码登录即可。粘贴时至少要有 SESSDATA 和 bili_jct',
+      },
+      { path: 'social.interests', label: '感兴趣的关键词（逗号分隔）', type: 'csv', hint: '除了热门，还会按这些词搜 B站' },
+      { path: 'social.everyMinutes', label: '几分钟刷一轮（0=不自动）', type: 'number', min: 0, max: 720 },
+      { path: 'social.maxAgeHours', label: '只看多少小时内发的', type: 'number', min: 1, max: 720 },
+      { path: 'social.maxCommentsRead', label: '每条最多读几条评论', type: 'number', min: 1, max: 40 },
+      { path: 'social.commentPerDay', label: '每天最多评论几条', type: 'number', min: 0, max: 50 },
+      { path: 'social.likePerDay', label: '每天最多点赞几个', type: 'number', min: 0, max: 100 },
+      { path: 'social.learnFeed', label: '把刷到的知识送去蒸馏', type: 'bool', hint: '视频标题/简介/评论会变成长期笔记，回话时能用上' },
+      { path: 'social.minGapMs', label: '两次写动作间隔（毫秒）', type: 'number', min: 0, max: 86400000, step: 60000 },
+      { path: 'social.quietHours', label: '安静时段', type: 'csv' },
+      { path: 'social.dryRun', label: '只演练不发', type: 'bool' },
     ],
   },
   {

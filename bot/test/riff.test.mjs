@@ -17,7 +17,12 @@ test('parseCandidates 只认「化用句 ||| 出处」且过滤过短过长', ()
 });
 
 test('riffCandidates 用 stub 模型就能产出候选，失败返回空', async () => {
-  const brain = { complete: async () => '老实上班很枯燥吧 ||| 老实赚钱很枯燥吧' };
+  const brain = { complete: async ({ purpose, system }) => {
+    assert.equal(purpose, 'background', '预生成走便宜后台档位');
+    assert.match(system, /宁缺毋滥/);
+    assert.doesNotMatch(system, /至少 1 行|只输出 3 行/);
+    return '老实上班很枯燥吧 ||| 老实赚钱很枯燥吧';
+  } };
   const rows = await riffCandidates({ brain, scene: ['阿强: 今天又加班'], memes: [{ name: '哈基米', meaning: '猫' }] });
   assert.equal(rows.length, 1);
   assert.match(rows[0].said, /老实上班/);

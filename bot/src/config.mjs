@@ -20,6 +20,8 @@ export const DEFAULTS = {
     model: 'deepseek-chat',
     apiKeyEnv: 'DEEPSEEK_API_KEY',
     apiKey: '',
+    reasoningEffort: '',
+    reasoningEfforts: { chat: '', agent: '', background: '' },
     temperature: 1.1,
     // 可选：{ chat: 0.95, agent: 0.7, background: 0.6 }，按用途覆盖 temperature
     temperatures: {},
@@ -65,8 +67,8 @@ export const DEFAULTS = {
     vision: {
       enabled: true,
       maxImages: 3,
-      maxBytes: 8000000,
-      timeoutMs: 12000,
+      maxBytes: 20000000,
+      timeoutMs: 30000,
       // 动图（gif / 动态 webp / apng）：用 ffmpeg 均匀抽帧，一帧算一张图
       gif: { enabled: true, maxFrames: 3 },
       // 视频：先下到临时文件再抽关键帧，不把整段视频塞给模型；maxBytes 是下载体积上限
@@ -117,6 +119,8 @@ export const DEFAULTS = {
       minLines: 20,
       budget: 520,
       maxNotes: 600,
+      // 让它在蒸馏之后自己微调人设（只允许往 style / rules 里追加，留历史可回滚）
+      personaEvolve: true,
       // 语义检索（阿里云百炼 OpenAI 兼容 /embeddings）：挂了就自动退回字面检索
       embedding: {
         enabled: false,
@@ -131,6 +135,24 @@ export const DEFAULTS = {
       },
     },
       memeCollect: { enabled: true, maxPerDay: 8, minIntervalMs: 30000, maxBytes: 8000000 },
+  },
+  // 视频社交：自己去 B站 刷内容、看评论，决定要不要点赞或评论。
+  // 匿名就能读热门/搜索/评论；扫码登录后能读关注动态、点赞和发评论。
+  social: {
+    enabled: true,
+    bilibili: { enabled: true, cookie: '' },
+    interests: [],
+    everyMinutes: 30,
+    maxAgeHours: 72,
+    maxCommentsRead: 12,
+    // 额度比初版放大 4 倍（用户 2026-11-07 要求）；面板「设置 → 视频社交」可改
+    commentPerDay: 12,
+    likePerDay: 32,
+    // 刷到的视频/评论交给蒸馏，变成以后能用的知识
+    learnFeed: true,
+    minGapMs: 900000,
+    quietHours: ['23:30-08:30'],
+    dryRun: false,
   },
   // 生图（OpenAI 兼容 /images/generations）：QQ 机器人自己画图发出去
   image: {

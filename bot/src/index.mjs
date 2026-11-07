@@ -19,7 +19,9 @@ import { MemeKB } from './kb.mjs';
 import { WeeklyScan } from './kb-scan.mjs';
 import { DecisionLog } from './decisions.mjs';
 import { LearnBook, Learner } from './learn.mjs';
+import { PersonaEvolver } from './persona-evolve.mjs';
 import { QzoneSocial } from './qzone.mjs';
+import { SocialHub } from './social.mjs';
 import { embedderOf } from './embed.mjs';
 import { DailyNewsScheduler } from './daily-news.mjs';
 import { createLogger, Emitter, sleep } from './util.mjs';
@@ -172,6 +174,15 @@ async function cmdStart(flags) {
   });
   if (embedder) log.info('语义检索已启用：embedding ' + cfg.chat.learn.embedding.model);
   else log.info('语义检索未启用（没有 embedding key），只用字面检索');
+  const personaEvolver = new PersonaEvolver({
+    dataDir: cfg.storage.dataDir,
+    brain,
+    getPersona: () => store.persona() || cfg.persona,
+    setPersona: (p) => store.setPersona(p),
+    log: log.child('persona-evolve'),
+    enabled: cfg.chat?.learn?.personaEvolve !== false,
+  });
+
   const learner = new Learner({
     dataDir: cfg.storage.dataDir,
     brain,
@@ -192,7 +203,10 @@ async function cmdStart(flags) {
     everyHours: cfg.chat?.learn?.everyHours ?? 6,
     minLines: cfg.chat?.learn?.minLines ?? 20,
     maxNotes: cfg.chat?.learn?.maxNotes ?? 600,
+    personaEvolver,
   });
+
+  const kb = new MemeKB({ dataDir: cfg.storage.dataDir, log: log.child('kb') });
 
   const bot = new Bot({
     config: { ...cfg, persona: store.persona() || cfg.persona },
@@ -204,6 +218,7 @@ async function cmdStart(flags) {
     decisions,
     memes,
     learn: learnBook,
+    kb,
     log: log.child('bot'),
     emitter,
   });
@@ -233,8 +248,6 @@ async function cmdStart(flags) {
     emitter,
   });
 
-  const kb = new MemeKB({ dataDir: cfg.storage.dataDir, log: log.child('kb') });
-
   // QQ 空间社交：回评自己说说下的评论、评论好友说说（护栏都在 qzone.mjs 里）
   const qzone = new QzoneSocial({
     config: cfg,
@@ -243,6 +256,17 @@ async function cmdStart(flags) {
     log: log.child('qzone'),
   });
   bot.qzone = qzone;
+
+  // 视频社交：自己刷 B站，看评论决定点赞或评论（护栏都在 social.mjs 里）
+  const social = new SocialHub({
+    config: cfg,
+    brain,
+    learner,
+    dataDir: cfg.storage.dataDir,
+    log: log.child('social'),
+    emitter,
+  });
+  bot.social = social;
 
   const agent = new AgentLoop({
     config: { ...cfg, agent: cfg.agent },
@@ -255,6 +279,7 @@ async function cmdStart(flags) {
     learn: learnBook,
     learner,
     qzone,
+    social,
     log: log.child('agent'),
     emitter,
   });
@@ -276,7 +301,7 @@ async function cmdStart(flags) {
   });
   weeklyKb.start();
 
-  const control = new ControlServer({ config: cfg, configPath: cfg.__configPath || null, bot, share, interject, agent, people, decisions, dailyNews, kb, kbScan: weeklyKb, learn: learnBook, learner, qzone, log: log.child('control'), emitter });
+  const control = new ControlServer({ config: cfg, configPath: cfg.__configPath || null, bot, share, interject, agent, people, decisions, dailyNews, kb, kbScan: weeklyKb, learn: learnBook, learner, qzone, social, personaEvolve: personaEvolver, log: log.child('control'), emitter });
   emitter.on((event) => control.broadcast(event));
 
   await bot.start();
@@ -311,6 +336,17 @@ async function cmdStart(flags) {
     log.info(`空间评论必回已启用：每 ${every / 60_000} 分钟看一次（指向它的评论不设额度）`);
   }
 
+  // 视频社交：每 N 分钟刷一轮（一轮最多一个写动作，护栏在 social.mjs）
+  if (cfg.social?.enabled && Number(cfg.social?.everyMinutes ?? 30) > 0) {
+    const every = Math.max(5, Number(cfg.social.everyMinutes) || 30) * 60_000;
+    const task = () => social.tick().catch((err) => log.warn(`视频社交失败：${err.message}`));
+    const kick = setTimeout(task, 120_000);
+    const loop = setInterval(task, every);
+    kick.unref?.();
+    loop.unref?.();
+    log.info(`视频社交已启用：每 ${every / 60_000} 分钟刷一轮`);
+  }
+
   const url = `http://${cfg.control.host}:${cfg.control.port}`;
   log.info(`控制台：${url}${cfg.control.token ? `/?token=${cfg.control.token}` : ''}`);
   if (!bot.selfId) log.warn('还没有拿到机器人账号信息：确认 SnowLuma 已登录、HTTP 端口开着');
@@ -326,6 +362,7 @@ async function cmdStart(flags) {
     share.stop();
     interject.stop();
     agent.stop();
+    social.stop();
     dailyNews.stop();
     weeklyKb.stop();
     await bot.stop();

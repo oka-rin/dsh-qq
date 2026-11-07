@@ -237,16 +237,38 @@ export function apply(ctx, config = {}) {
     autoRestart: cfg.autoRestart, restartDelayMs: cfg.restartDelayMs });
   const botState = manager.state;
 
-  // 群列表缓存：面板刷新别每次都打 QQ
-  let groupsCache = { at: 0, data: null };
-  async function freshGroups() {
-    if (groupsCache.data && Date.now() - groupsCache.at < 60_000) return groupsCache.data;
-    const r = await api('/api/groups?refresh=1').catch(() => null);
-    if (r?.ok) {
-      groupsCache = { at: Date.now(), data: r };
-      return r;
-    }
-    return groupsCache.data || { ok: false, groups: [] };
+  // Keep last-good data, but never turn a failed read into a successful empty list.
+  const sourceCache = new Map();
+  const sourcePending = new Map();
+  async function readSource(name, pathName, { ttl = 0, force = false } = {}) {
+    const previous = sourceCache.get(name);
+    if (!force && ttl && previous?.freshness.ok && Date.now() - previous.freshness.checkedAt < ttl) return previous;
+    if (sourcePending.has(name)) return sourcePending.get(name);
+    const pending = (async () => {
+      let result;
+      try {
+        const data = await api(pathName);
+        result = { data, freshness: data?.freshness && typeof data.freshness.ok === 'boolean'
+          ? data.freshness : { checkedAt: Date.now(), updatedAt: Date.now(), ok: true, error: '' } };
+      } catch (error) {
+        result = { data: previous?.data || null, freshness: {
+          checkedAt: Date.now(), updatedAt: previous?.freshness.updatedAt || null,
+          ok: false, error: String(error?.message || error),
+        } };
+      }
+      sourceCache.set(name, result);
+      return result;
+    })();
+    sourcePending.set(name, pending);
+    try { return await pending; } finally { sourcePending.delete(name); }
+  }
+
+  // Polling may reuse groups for one minute; explicit refresh bypasses the cache.
+  async function freshGroups(force = false) {
+    const result = await readSource('groups', '/api/groups?refresh=1', { ttl: 60_000, force });
+    const upstream = result.data?.freshness;
+    return { ...(result.data || {}), ok: result.freshness.ok && upstream?.ok !== false,
+      freshness: result.freshness.ok && upstream ? upstream : result.freshness };
   }
 
   const readAgentLog = (limit = 200) =>
@@ -353,21 +375,32 @@ export function apply(ctx, config = {}) {
     const scope = url.searchParams.get('scope') || '';
     const limit = Math.min(Number(url.searchParams.get('limit')) || 30, 200);
 
-    const [status, groups, friends, scopes, editable, people, decisions, dailyNews] = await Promise.all([
-      api('/api/status').catch((e) => ({ ok: false, error: String(e?.message || e) })),
-      freshGroups().catch(() => ({ ok: false, groups: [] })),
-      api('/api/friends').catch(() => ({ ok: false, friends: [] })),
-      api('/api/scopes').catch(() => ({ ok: false, scopes: [] })),
-      api('/api/config').catch(() => ({ ok: false, editable: null })),
-      api('/api/people').catch(() => ({ ok: false, people: [] })),
-      api('/api/decisions?limit=25').catch(() => ({ ok: false, recent: [], today: null })),
-      api('/api/daily-news').catch((e) => ({ ok: false, error: String(e?.message || e) })),
+    const [statusRead, groups, friendsRead, scopesRead, configRead, peopleRead, decisionsRead, newsRead, socialRead, personaEvolveRead] = await Promise.all([
+      readSource('status', '/api/status'),
+      freshGroups(url.searchParams.get('refresh') === '1'),
+      readSource('friends', '/api/friends'),
+      readSource('scopes', '/api/scopes'),
+      readSource('config', '/api/config'),
+      readSource('people', '/api/people'),
+      readSource('decisions', '/api/decisions?limit=25'),
+      readSource('dailyNews', '/api/daily-news'),
+      readSource('social', '/api/social'),
+      readSource('personaEvolve', '/api/persona/evolve'),
+    ]);
+    const status = statusRead.data ? { ...statusRead.data, ok: statusRead.freshness.ok } : { ok: false };
+    const friends = friendsRead.data, scopes = scopesRead.data, editable = configRead.data;
+    const people = peopleRead.data, decisions = decisionsRead.data, dailyNews = newsRead.data;
+    const freshness = Object.fromEntries([
+      ['status', statusRead.freshness], ['identity', statusRead.freshness.ok ? status.freshness?.identity || { ...statusRead.freshness, ok: false, error: '身份刷新状态未提供' } : statusRead.freshness],
+      ['groups', groups.freshness], ['friends', friendsRead.freshness], ['scopes', scopesRead.freshness],
+      ['config', configRead.freshness], ['people', peopleRead.freshness], ['decisions', decisionsRead.freshness], ['dailyNews', newsRead.freshness], ['social', socialRead.freshness], ['personaEvolve', personaEvolveRead.freshness],
     ]);
 
     return {
       ok: true,
       now: Date.now(),
-      control: { base: controlBase(), reachable: status?.ok !== false, managed: Boolean(cfg.manageBot) },
+      freshness,
+      control: { base: controlBase(), reachable: statusRead.freshness.ok, managed: Boolean(cfg.manageBot) },
       bot: {
         managed: Boolean(cfg.manageBot),
         childPid: botState.child?.pid || null,
@@ -377,9 +410,9 @@ export function apply(ctx, config = {}) {
         logs: logs.slice(-120),
       },
       status,
-      groups: groups?.groups || groups?.data || [],
-      friends: friends?.friends || [],
-      scopes: scopes?.scopes || [],
+      groups: groups?.groups || groups?.data || null,
+      friends: friends?.friends || null,
+      scopes: scopes?.scopes || null,
       agent: botCfg.agent || {},
       share: botCfg.share || {},
       chat: { enabled: botCfg.chat?.enabled, vision: botCfg.chat?.vision || {} },
@@ -390,10 +423,12 @@ export function apply(ctx, config = {}) {
       archive: readArchive(),
       editable: editable?.editable || null,
       configSchema: editable?.schema || null,
-      people: people?.people || [],
-      decisions: { recent: decisions?.recent || [], today: decisions?.today || null },
-      dailyNews: dailyNews?.ok === true ? dailyNews.dailyNews : null,
-      dailyNewsError: dailyNews?.ok === true ? null : dailyNews?.error || '读不到资讯订阅状态',
+      people: people?.people || null,
+      decisions: decisions ? { recent: decisions.recent || [], today: decisions.today || null } : null,
+      social: socialRead.data || null,
+      personaEvolve: personaEvolveRead.data || null,
+      dailyNews: dailyNews?.dailyNews || null,
+      dailyNewsError: newsRead.freshness.ok ? null : newsRead.freshness.error || '读不到资讯订阅状态',
       messages: scope ? readMessages(scope, limit) : [],
       scope,
     };
@@ -441,6 +476,12 @@ export function apply(ctx, config = {}) {
       qzone: { path: '/api/agent', payload: { mode: 'qzone' } },
       speak: { path: '/api/agent', payload: { mode: 'speak' } },
       agent: { path: '/api/agent', payload: {} },
+      'social-tick': { path: '/api/social', payload: { op: 'tick', force: true } },
+      'social-check': { path: '/api/social', payload: { op: 'check' } },
+      'social-login': { path: '/api/social', payload: { op: 'login' } },
+      'social-logout': { path: '/api/social', payload: { op: 'logout' } },
+      'social-quota': { path: '/api/social', payload: { op: 'quota', commentPerDay: body.commentPerDay, likePerDay: body.likePerDay } },
+      'persona-undo': { path: '/api/persona/evolve', payload: { op: 'undo', id: body.id } },
     };
     const hit = map[kind];
     if (!hit) return json(res, { ok: false, error: `不认识的按钮：${kind}` });
@@ -524,9 +565,15 @@ export function apply(ctx, config = {}) {
     json(res, { ok: out?.ok !== false, result: out });
   });
 
-  // 开关某个会话的自动聊天
-  route('/dsh-qq/autochat', async (req, res) => {
-    if (req.method !== 'POST') return json(res, { ok: false, error: '只接受 POST' });
+  // 当前会话被动回复：读取和写入均返回机器人内的真实状态。
+  route('/dsh-qq/autochat', async (req, res, url) => {
+    if (req.method === 'GET') {
+      const scope = url.searchParams.get('scope');
+      if (!scope) return json(res, { ok: false, error: '要带 scope' });
+      const out = await api(`/api/autochat?scope=${encodeURIComponent(scope)}`);
+      return json(res, { ok: true, result: out });
+    }
+    if (req.method !== 'POST') return json(res, { ok: false, error: '只接受 GET 或 POST' });
     const body = await readBody(req);
     if (!body.scope) return json(res, { ok: false, error: '要带 scope' });
     const out = await api('/api/autochat', {

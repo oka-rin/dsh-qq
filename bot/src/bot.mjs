@@ -31,6 +31,7 @@ import { collect as collectMeme, fetchImage } from './meme-collect.mjs';
 import { lookupIfNeeded } from './websearch.mjs';
 import { drawPromptOf, generateImage, wantsDraw, wantsRedraw, wantsResend, wantsWait } from './imagegen.mjs';
 import { refinePrompt } from './promptbrain.mjs';
+import { formatReplies, formatMimic, formatWishes } from './social.mjs';
 
 const ADMIN_MUTE = /^(闭嘴|别说了|安静|安静点|别bb|停下|shut ?up)[!！。.~]*$/i;
 const ADMIN_UNMUTE = /^(开聊|说话|继续说|出来|继续)[!！。.~]*$/i;
@@ -41,7 +42,7 @@ const ADMIN_STATUS = /^(状态|status)[?？!！。.]*$/i;
  * 也对外暴露 send/autochat 等方法，供控制台、MCP、CLI 复用。
  */
 export class Bot {
-  constructor({ config, onebot, store, brain, scopeMemory = null, people = null, decisions = null, memes = null, learn = null, log = createLogger('bot'), emitter = new Emitter() }) {
+  constructor({ config, onebot, store, brain, scopeMemory = null, people = null, decisions = null, memes = null, learn = null, kb = null, log = createLogger('bot'), emitter = new Emitter() }) {
     this.cfg = config;
     this.onebot = onebot;
     this.store = store;
@@ -49,6 +50,7 @@ export class Bot {
     this.scopeMemory = scopeMemory; // 群记忆（ScopeMemory），与下面按会话缓存的 this.memory 不是一回事
     this.people = people; // 人物画像（PeopleBook）
     this.learn = learn; // 自主学习笔记（LearnBook）
+    this.kb = kb; // 梗知识库：本地相关检索，不新增模型调用
     this.decisions = decisions; // 「为什么没说话」账本
     this.memes = memes; // 表情包图库（MemeLibrary），发图时用
     this.memeHashes = new Set(); // 收集去重：最近入库过的图片内容哈希
@@ -61,6 +63,12 @@ export class Bot {
     this.startedAt = Date.now();
     this.selfId = String(config.onebot.selfId || '');
     this.nickname = '';
+    this.freshness = {
+      identity: { checkedAt: 0, updatedAt: 0, ok: false, error: '' },
+      groups: { checkedAt: 0, updatedAt: 0, ok: false, error: '' },
+    };
+    this.identityRefresh = null;
+    this.groupsRefresh = null;
     this.groups = new Map(); // groupId -> { group_id, group_name, member_count }
     this.memory = new Map(); // scope -> rows[]
     this.sentIds = new Set();
@@ -90,15 +98,8 @@ export class Bot {
   /* ------------------------------------------------------------ 生命周期 */
 
   async start() {
-    const info = await this.onebot.loginInfo().catch((err) => {
-      this.log.warn(`获取登录信息失败（不影响继续）：${err.message}`);
-      return null;
-    });
-    if (info) {
-      this.selfId = String(info.user_id ?? this.onebot.state.selfId ?? this.selfId);
-      this.nickname = info.nickname || '';
-      this.log.info(`以 ${this.nickname}(${this.selfId}) 身份接入`);
-    }
+    await this.refreshIdentity();
+    if (this.freshness.identity.ok) this.log.info(`以 ${this.nickname}(${this.selfId}) 身份接入`);
     await this.refreshGroups();
 
     this.unsubs.push(this.onebot.onEvent((event) => this.onEvent(event)));
@@ -125,18 +126,57 @@ export class Bot {
     }
   }
 
-  async refreshGroups() {
-    try {
-      const list = await this.onebot.call('get_group_list');
-      if (Array.isArray(list)) {
-        this.groups.clear();
-        for (const g of list) this.groups.set(String(g.group_id), g);
-        this.log.debug(`群列表已刷新：${this.groups.size} 个群`);
+  async refreshIdentity() {
+    if (this.identityRefresh) return this.identityRefresh;
+    const task = (async () => {
+      try {
+        const info = await this.onebot.loginInfo({ timeoutMs: 3000 });
+        const selfId = String(info?.user_id ?? info?.uin ?? '');
+        if (!/^\d+$/.test(selfId) || typeof info?.nickname !== 'string') throw new Error('登录信息缺少有效账号或昵称');
+        this.selfId = selfId;
+        this.nickname = info.nickname;
+        if (info.nicknameError) {
+          this.freshness.identity = { ...this.freshness.identity, checkedAt: Date.now(), ok: false, error: info.nicknameError, source: 'cache' };
+        } else {
+          this.freshness.identity = { checkedAt: Date.now(), updatedAt: Date.now(), ok: true, error: '', source: info.nicknameSource || 'login' };
+        }
+      } catch (err) {
+        this.freshness.identity = { ...this.freshness.identity, checkedAt: Date.now(), ok: false, error: err?.message || String(err) };
+        this.log.debug(`刷新登录信息失败：${err?.message || err}`);
       }
-    } catch (err) {
-      this.log.debug(`刷新群列表失败：${err.message}`);
-    }
-    return [...this.groups.values()];
+    })();
+    this.identityRefresh = task;
+    try { await task; } finally { this.identityRefresh = null; }
+    return this.freshness.identity;
+  }
+
+  async refreshStatus() {
+    await this.refreshIdentity();
+    return this.status();
+  }
+
+  async refreshGroups() {
+    if (this.groupsRefresh) return this.groupsRefresh;
+    const task = (async () => {
+      try {
+        const list = await this.onebot.call('get_group_list', {}, { timeoutMs: 5000 });
+        if (!Array.isArray(list)) throw new Error('群列表返回格式无效');
+        const groups = new Map();
+        for (const g of list) {
+          if (!g || g.group_id == null) throw new Error('群列表缺少群号');
+          groups.set(String(g.group_id), g);
+        }
+        this.groups = groups;
+        this.freshness.groups = { checkedAt: Date.now(), updatedAt: Date.now(), ok: true, error: '' };
+        this.log.debug(`群列表已刷新：${this.groups.size} 个群`);
+      } catch (err) {
+        this.freshness.groups = { ...this.freshness.groups, checkedAt: Date.now(), ok: false, error: err?.message || String(err) };
+        this.log.debug(`刷新群列表失败：${err?.message || err}`);
+      }
+      return [...this.groups.values()];
+    })();
+    this.groupsRefresh = task;
+    try { return await task; } finally { this.groupsRefresh = null; }
   }
 
   /* -------------------------------------------------------------- 事件 */
@@ -544,8 +584,11 @@ export class Bot {
       }
     })();
     this.inflight.add(task);
-    task.finally(() => this.inflight.delete(task));
-    await task;
+    try {
+      await task;
+    } finally {
+      this.inflight.delete(task);
+    }
   }
 
   /** 如果这条是「回复我」，把被回复的那句原文取出来（模型看得到上下文，才不会接得莫名其妙） */
@@ -669,6 +712,24 @@ export class Bot {
     }
   }
 
+  #memeReference(scope, event) {
+    if (this.cfg.kb?.enabled === false || !this.kb?.relevant) return '';
+    try {
+      // 只用当前人类消息及同一人的紧邻上下文，不拿机器人自己的冷笑话自我强化。
+      const rows = this.#memoryOf(scope).filter((r) => r.role !== 'bot'
+        && String(r.userId || '') === String(event?.user_id || '')).slice(-3);
+      const current = this.#plainOf(event);
+      const at = Number(event?.time) * 1000 || Date.now();
+      const fresh = rows.filter((r) => at - Number(r.at ?? r.ts ?? 0) < 10 * 60_000);
+      const context = [...fresh.map((r) => r.text || ''), current].join('\n');
+      return this.kb.relevant(context, { limit: 3, budget: 600 })
+        .map((r) => `- ${r.name}：${r.meaning || r.usage || ''}${r.example ? `；用法例：${r.example}` : ''}`)
+        .join('\n').slice(0, 600);
+    } catch {
+      return ''; // 梗库异常不影响正常回话
+    }
+  }
+
   async #reply(scope, reason, ctx) {
     const { event, name } = ctx;
     const { type, id } = scopeKey(scope);
@@ -712,6 +773,12 @@ export class Bot {
         peopleText,
         webText,
         learnText,
+        memeText: this.#memeReference(scope, event),
+        socialText: [
+          formatReplies(this.social?.recentReplies?.({ limit: 3 }) || [], { limit: 3 }),
+          formatMimic([...(this.learn?.byKind?.('behavior', 2) || []), ...(this.learn?.byKind?.('phrase', 1) || [])], { limit: 3 }),
+          formatWishes(this.social?.recentWishes?.({ limit: 2 }) || [], { limit: 2 }),
+        ].filter(Boolean).join('\n\n'),
         followUp,
         // 视频补话这类「同一件事的收尾」自带指令，可以覆盖默认的接话要求
         customAsk: ctx.customAsk || '',
@@ -739,6 +806,12 @@ export class Bot {
         this.emitter.emit({ type: 'skip', scope, reason: 'tone-guard', at: Date.now() });
       }
     } catch (err) {
+      // Only persist a fixed category: endpoint errors can contain credentials or response bodies.
+      const interrupted = /abort|timeout|timed out|超时/i.test(`${err?.name || ''} ${err?.message || ''}`);
+      this.decisions?.record({
+        scope, kind: 'passive', reason: '模型生成失败',
+        detail: interrupted ? '模型请求超时或中断' : '模型调用异常', acted: false,
+      });
       this.log.error(`模型生成失败：${err.message}`);
       this.emitter.emit({ type: 'error', scope, error: err.message, at: Date.now() });
       return;
@@ -1248,6 +1321,17 @@ export class Bot {
     return this.store.tail(scopeKey(scope).key, limit);
   }
 
+  /** Read the passive-reply gates without creating a scope or changing persisted defaults. */
+  getAutochat(scope) {
+    const { key } = scopeKey(scope);
+    // scopeState() creates defaults for a nullish scope, but an existing scope's
+    // autochat value must retain the exact truthiness used by #decideTrigger().
+    const state = this.store.state.scopes[key] ?? { autochat: true };
+    const autochat = Boolean(state.autochat);
+    const globalEnabled = Boolean(this.cfg.chat.enabled);
+    return { scope: key, autochat, globalEnabled, effectiveEnabled: autochat && globalEnabled };
+  }
+
   setAutochat(scope, enabled) {
     return this.store.setScopeAutochat(scopeKey(scope).key, enabled);
   }
@@ -1261,11 +1345,12 @@ export class Bot {
     return {
       selfId: this.selfId,
       nickname: this.nickname,
+      freshness: Object.fromEntries(Object.entries(this.freshness).map(([key, value]) => [key, { ...value }])),
       startedAt: this.startedAt,
       uptimeMs: Date.now() - this.startedAt,
       groups: this.groups.size,
       llmMode: this.brain.mode,
-      model: this.cfg.llm.model,
+      model: this.brain.modelFor?.('chat') || this.cfg.llm.models?.chat || this.cfg.llm.models?.default || this.cfg.llm.model,
       persona: this.personaName,
       transport: { ...this.onebot.state },
       stats: { ...this.store.state.stats },

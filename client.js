@@ -387,6 +387,40 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // Schema selects accept legacy strings and labelled { value, label } options.
+    function selectOptions(options) {
+      return (options || []).map((option) => {
+        const value = String((option && typeof option === 'object' ? option.value : option) ?? '');
+        const label = option && typeof option === 'object' ? String(option.label ?? value) : value;
+        return h('option', { key: value, value }, label);
+      });
+    }
+
+    const reasoningEffortOptions = [
+      { value: 'none', label: '不推理 · none' },
+      { value: 'minimal', label: '极少 · minimal' },
+      { value: 'low', label: '低 · low' },
+      { value: 'medium', label: '中 · medium' },
+      { value: 'high', label: '高 · high' },
+      { value: 'xhigh', label: '极高 · xhigh' },
+    ];
+    function ReasoningEffortFields({ llm, onChange }) {
+      const fields = [
+        { path: 'llm.reasoningEffort', label: '默认思考程度', value: llm?.reasoningEffort, empty: '跟随接口默认（不传参数）' },
+        { path: 'llm.reasoningEfforts.chat', label: '聊天思考程度', value: llm?.reasoningEfforts?.chat, empty: '继承默认思考程度' },
+        { path: 'llm.reasoningEfforts.agent', label: '决策思考程度', value: llm?.reasoningEfforts?.agent, empty: '继承默认思考程度' },
+        { path: 'llm.reasoningEfforts.background', label: '蒸馏思考程度', value: llm?.reasoningEfforts?.background, empty: '继承默认思考程度' },
+      ];
+      return h('div', null,
+        h('div', { style: { ...说明, marginBottom: 8 } }, '思考程度 reasoning_effort：仅支持此参数的模型可用，不支持的模型或档位可能被接口拒绝；高档位通常更慢、费用更高。'),
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 8 } },
+          ...fields.map((field) => h('label', { key: field.path, style: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, fontSize: 12.5 } },
+            h('span', null, field.label),
+            h('select', { 'aria-label': field.label, value: String(field.value ?? ''), onChange: (event) => onChange(field.path, event.target.value), style: { ...输入框, width: '100%' } },
+              ...selectOptions([{ value: '', label: field.empty }, ...reasoningEffortOptions]))))),
+        h('div', { style: { ...说明, marginTop: 6 } }, '默认选「跟随接口」时不发送 reasoning_effort；分用途选「继承」时使用默认思考程度，蒸馏也一样。none 是显式档位，不等于留空。'));
+    }
+
     const KIND_LABEL = { speak: '说话', share: '分享', qzone: '说说', op: '操作', skip: '跳过', none: '其他' };
 
     function timeText(ts) {
@@ -475,7 +509,7 @@ window.__ModuleLoader__.load({
             style: { ...输入, width: 160 }, onChange: (e) => change('dailyNews.notBeforeDate', e.target.value) }), '可留空；早于此日期不推送'),
           field('错过后补发窗口', 数字(cfg.catchUpMinutes, (v) => change('dailyNews.catchUpMinutes', v), { min: 1, max: 180, 后缀: '分钟' }), '从各来源的推送时刻起计算，超过窗口不补发'),
           field('来源失败重试间隔', 数字(cfg.retryMinutes, (v) => change('dailyNews.retryMinutes', v), { min: 1, max: 60, 后缀: '分钟' })),
-          field('不同来源间隔', 数字(Number(cfg.sourceGapMs) / 1000, (v) => change('dailyNews.sourceGapMs', v === '' ? '' : Math.round(v * 1000)), { min: 0, max: 10, step: 0.5, 后缀: '秒' })),
+          field('不同来源间隔', 数字(Number(cfg.sourceGapMs) / 1000, (v) => change('dailyNews.sourceGapMs', v === '' ? '' : Math.round(v * 1000)), { min: 0, max: 10, step: 0.001, 后缀: '秒' })),
           h('div', { style: { ...行, marginTop: 12 } },
             h('strong', null, `订阅来源 · ${sources.length} / 12`),
             h('button', { type: 'button', style: S.btn(false), onClick: () => change('dailyNews.sources', NEWS_CATALOG.map(([id]) => id)) }, '全选'),
@@ -488,9 +522,8 @@ window.__ModuleLoader__.load({
                 clock(newsTime(cfg, id, recommended), (v) => change(`dailyNews.sourceTimes.${id}`, v), `${name}推送时间`)),
               h('div', { style: S.dim }, `${sources.includes(id) ? '已订阅' : '未订阅'} · 推荐 ${recommended}`)))),
           h('p', { style: S.dim }, '新游可选配 RAWG_API_KEY 扩展范围；未配置或主源失败时使用蒸汽平台中国区 PC 子集。此页不显示也不保存密钥。金价标注实际报价日，不冒充实时价格。'),
-          h('div', { style: 行 }, h('button', { type: 'button', style: S.btn(true), disabled: !dirty || saving, onClick: save }, saving ? '保存中…' : '保存所有设置并重启'),
-            h('span', { style: S.dim }, dirty ? '尚有未保存修改（包括下方设置）' : '设置已保存')),
-          message ? h('div', { role: 'status', style: S.dim }, message) : null,
+          h(JsonValueEditor, { value: cfg.sources || [], label: '订阅来源 JSON', onChange: (v) => change('dailyNews.sources', v) }),
+          h(JsonValueEditor, { value: cfg.sourceTimes || {}, label: '来源时间 JSON', onChange: (v) => change('dailyNews.sourceTimes', v) }),
         ) : h('p', { style: S.dim }, '尚未取得可编辑配置，请稍后刷新。'),
         h('details', { style: { marginTop: 12 } },
           h('summary', { style: { cursor: 'pointer' } }, `最近资讯执行记录 · ${Math.min(rows.length, 50)} 条`),
@@ -511,6 +544,43 @@ window.__ModuleLoader__.load({
 
 
     // 「全部配置」：照着宿主给的 schema 渲染，字段增删只改 snowluma-qq 的 src/schema.mjs
+    // Each path has one editable owner. Complex lists retain a text editor in the
+    // dedicated card so advanced filtering never discards unknown/offline entries.
+    function JsonValueEditor({ value, onChange, label }) {
+      const [text, setText] = React.useState(() => JSON.stringify(value ?? [], null, 2));
+      const [error, setError] = React.useState('');
+      const dirty = React.useRef(false);
+      React.useEffect(() => { if (!dirty.current) setText(JSON.stringify(value ?? [], null, 2)); }, [value]);
+      return h('details', { style: { marginTop: 6 } },
+        h('summary', { style: { ...S.dim, cursor: 'pointer', overflowWrap: 'anywhere' } }, `${label} · ${Array.isArray(value) ? value.length ? value.join('、') : '未设置' : `${Object.keys(value || {}).length} 项`}`),
+        h('div', { style: S.dim }, '用于完整编辑自定义值；合法 JSON 会自动加入当前草稿，随后统一保存。'),
+        h('textarea', { value: text, rows: 3, spellCheck: false, 'aria-label': label,
+          style: { ...输入框, fontFamily: 'monospace' }, onChange: (event) => {
+            const next = event.target.value; setText(next); dirty.current = true;
+            try {
+              const parsed = JSON.parse(next);
+              if (Array.isArray(value) ? !Array.isArray(parsed) || parsed.some((v) => typeof v !== 'string')
+                : !parsed || Array.isArray(parsed) || typeof parsed !== 'object' || Object.values(parsed).some((v) => typeof v !== 'string')) throw new Error('需要字符串列表或时间映射');
+              setError(''); dirty.current = false; onChange(parsed);
+            } catch { setError('格式无效，尚未应用；请填写合法 JSON。'); }
+          } }),
+        error ? h('div', { role: 'alert', style: { ...S.dim, color: T.warn } }, error) : null);
+    }
+    const 常用配置路径 = new Set([
+      'agent.enabled', 'agent.everyMinutes', 'agent.jitterMinutes', 'agent.minGapMs',
+      'agent.group.minPerDay', 'agent.group.maxPerDay', 'agent.private.minPerDay', 'agent.private.maxPerDay',
+      'agent.quietHours', 'agent.shareEveryHours', 'agent.qzoneEveryHours', 'agent.dryRun', 'agent.allowDestructive', 'agent.targets',
+      'chat.randomInterject.chance', 'chat.replyOnMention', 'chat.replyOnReplyToMe', 'chat.replyPrivate', 'chat.aiDecide',
+      'chat.maxReplyChars', 'chat.historyChars', 'chat.recentSelfEcho',
+      'llm.model', 'llm.models.chat', 'llm.models.agent', 'llm.maxTokens', 'llm.temperature',
+      'llm.reasoningEffort', 'llm.reasoningEfforts.chat', 'llm.reasoningEfforts.agent', 'llm.reasoningEfforts.background',
+      'share.interests', 'share.sources', 'persona.name', 'persona.likes', 'persona.systemPrompt',
+      'dailyNews.enabled', 'dailyNews.time', 'dailyNews.timeZone', 'dailyNews.retryMinutes', 'dailyNews.catchUpMinutes',
+      'dailyNews.sources', 'dailyNews.sourceTimes', 'dailyNews.deduplicate', 'dailyNews.sourceGapMs', 'dailyNews.dryRun', 'dailyNews.notBeforeDate',
+    ]);
+    const 高级配置组 = (schema) => (schema || []).map((group) => ({ ...group,
+      fields: (group.fields || []).filter((field) => !常用配置路径.has(field.path)),
+    })).filter((group) => group.fields.length);
     const 配置字段表 = (组) =>
       Object.fromEntries((组 || []).flatMap((g) => (g.fields || []).map((f) => [f.path, f])));
 
@@ -600,7 +670,7 @@ window.__ModuleLoader__.load({
         }
         if (f.type === 'select') {
           return h('select', { value: String(v || ''), onChange: (e) => 改(f.path, e.target.value), style: 输入框 },
-            ...((f.options || []).map((o) => h('option', { key: o, value: o }, o))));
+            ...selectOptions(f.options));
         }
         if (f.type === 'textarea' || f.type === 'json') {
           return h('textarea', { value: String(v ?? ''), rows: f.type === 'json' ? 4 : 5, spellCheck: false,
@@ -624,9 +694,9 @@ window.__ModuleLoader__.load({
       };
 
       return h('div', { style: S.card },
-        h('h2', { style: S.h2 }, '全部配置'),
+        h('h2', { style: S.h2 }, '高级参数'),
         h('div', { style: { ...S.dim, marginBottom: 8 } },
-          '机器人的每一项配置都在这里，按功能分组。改完点保存，进程会自动重启（约 3 秒）后生效；密钥留空表示不改。'),
+          '这里只列出常用设置未覆盖的参数；连接与密钥仍在这里。密钥留空不改，高级参数单独保存。'),
         h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 } },
           ...组.map((g) =>
             h('button', {
@@ -656,7 +726,44 @@ window.__ModuleLoader__.load({
       background: 'var(--dsw-alias-bg-layer-2)', color: 'inherit', fontFamily: 'inherit',
     };
 
-    // 对话：左边会话列表，右边消息流 + 发消息 + 自动聊天开关
+    // Scope reply state is authoritative, never inferred from a successful click.
+    function scopeReplyState(response, scope) {
+      const state = response?.result;
+      if (response?.ok !== true || state?.ok !== true || state.scope !== scope ||
+          typeof state.autochat !== 'boolean' || typeof state.globalEnabled !== 'boolean' ||
+          state.effectiveEnabled !== (state.autochat && state.globalEnabled)) {
+        throw new Error(response?.error || '无法确认当前会话回复状态，请刷新重试');
+      }
+      return { autochat: state.autochat, globalEnabled: state.globalEnabled, effectiveEnabled: state.effectiveEnabled };
+    }
+    function createScopeReplies({ get, post, update }) {
+      const entries = new Map();
+      let disposed = false;
+      const entry = (scope) => {
+        if (!entries.has(scope)) entries.set(scope, { version: 0, reading: false, writing: false, value: {} });
+        return entries.get(scope);
+      };
+      const publish = (scope, e, value) => { e.value = value; if (!disposed) update(scope, value); };
+      async function run(scope, enabled) {
+        if (!scope || disposed) return;
+        const e = entry(scope), write = typeof enabled === 'boolean';
+        if (e.writing || (!write && e.reading)) return;
+        const version = ++e.version;
+        if (write) e.writing = true; else e.reading = true;
+        publish(scope, e, { ...e.value, loading: true, writing: write, error: '' });
+        try {
+          const response = write ? await post('/autochat', { scope, enabled }) : await get(`/autochat?scope=${encodeURIComponent(scope)}`);
+          if (!disposed && e.version === version) publish(scope, e, { ...scopeReplyState(response, scope), loading: false, writing: false, error: '' });
+        } catch (error) {
+          if (!disposed && e.version === version) publish(scope, e, { loading: false, writing: false, error: error.message || '读取会话回复状态失败' });
+        } finally {
+          if (write) e.writing = false; else e.reading = false;
+        }
+      }
+      return { read: (scope) => run(scope), set: (scope, enabled) => run(scope, enabled), dispose: () => { disposed = true; } };
+    }
+
+    // 对话：左边会话列表，右边消息流 + 发消息 + 当前会话回复开关
     function ChatsPanel({ scopes, groups, online }) {
       const list = (Array.isArray(scopes) ? scopes : [])
         .map((s) => (typeof s === 'string' ? { scope: s } : s))
@@ -683,10 +790,17 @@ window.__ModuleLoader__.load({
       const locks = React.useRef(new Set());
       const text = drafts[cur] || '';
       const busy = Boolean(pending[`send:${cur}`]);
-      const autoBusy = Boolean(pending[`auto:${cur}`]);
-      // The Host has no autochat read endpoint; show only successful scoped writes,
-      // not an invented global on/off state inherited from the previous chat.
-      const 开 = autoStates[cur] ?? null;
+      const autoBusy = Boolean(autoStates[cur]?.writing);
+      const replyController = React.useRef(null);
+      React.useEffect(() => {
+        const controller = createScopeReplies({ get, post, update: (scope, state) => {
+          if (live.current) setAutoStates((old) => ({ ...old, [scope]: state }));
+        } });
+        replyController.current = controller;
+        return () => { controller.dispose(); replyController.current = null; };
+      }, []);
+      const replyState = autoStates[cur];
+      const 开 = replyState?.autochat ?? null;
       const 设Text = (value) => setDrafts((old) => ({ ...old, [cur]: value }));
       const choose = (scope) => { currentScope.current = scope; requestId.current += 1; 设Msgs([]); 设错(''); 设Cur(scope); };
       const scopeKeys = list.map((item) => item.scope).join('|');
@@ -704,7 +818,10 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         let active = true;
         let timer;
-        const poll = async () => { await 读(cur); if (active && cur) timer = setTimeout(poll, 6000); };
+        const poll = async () => {
+          await Promise.all([读(cur), replyController.current?.read(cur)]);
+          if (active && cur) timer = setTimeout(poll, 6000);
+        };
         poll();
         return () => { active = false; clearTimeout(timer); requestId.current += 1; };
       }, [cur, 读]);
@@ -728,13 +845,7 @@ window.__ModuleLoader__.load({
         if (r.ok) setDrafts((old) => old[scope]?.trim() === body ? { ...old, [scope]: '' } : old);
         later(() => 读(scope), 800);
       };
-      const 自动 = async (enabled) => {
-        const scope = cur;
-        const r = await runScoped('auto', scope, { scope, enabled });
-        if (!r) return;
-        if (r.ok) setAutoStates((old) => ({ ...old, [scope]: enabled }));
-        设Notes((n) => ({ ...n, [scope]: r.ok ? (enabled ? '自动聊天已开（本次设置）' : '自动聊天已关（本次设置）') : `操作失败：${r.error || '未知错误'}` }));
-      };
+      const 自动 = (enabled) => replyController.current?.set(cur, enabled);
 
       const 时间 = (at) => {
         const n = Number(at) || 0;
@@ -783,11 +894,14 @@ window.__ModuleLoader__.load({
             { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
             h('div', { style: { ...S.h2, margin: 0 } }, cur ? nameOf(cur) : '选一个会话'),
             h('span', { style: S.pill(online ? 'ok' : 'bad') }, online ? '在线' : '掉线'),
-            h('button', { style: S.btn(false), disabled: !cur, onClick: () => 读(cur) }, '刷新'),
-            h('span', { style: S.dim }, 开 === null ? '自动聊天：尚未读取' : '自动聊天：本次已设置'),
-            h('button', { style: S.btn(开 === true), disabled: !cur || autoBusy, onClick: () => 自动(true) }, '开自动聊天'),
-            h('button', { style: S.btn(开 === false), disabled: !cur || autoBusy, onClick: () => 自动(false) }, '关自动聊天'),
+            h('button', { style: S.btn(false), disabled: !cur, onClick: () => { 读(cur); replyController.current?.read(cur); } }, '刷新'),
+            h('span', { style: S.dim }, `当前会话回复：${replyState?.error ? '状态未知' : 开 === null ? (cur ? '读取中…' : '未选择会话') : 开 ? '允许' : '暂停'}${replyState?.loading && 开 !== null ? '（更新中…）' : ''}`),
+            h('button', { style: S.btn(开 === true), disabled: !cur || autoBusy || 开 === true, onClick: () => 自动(true) }, '允许回复'),
+            h('button', { style: S.btn(开 === false), disabled: !cur || autoBusy || 开 === false, onClick: () => 自动(false) }, '暂停回复'),
           ),
+          h('div', { style: S.dim }, '只控制当前会话的被动回复；暂停后即使 @ 也不回复，不影响主动搭话。允许后仍受全局开关和触发规则限制。'),
+          replyState?.globalEnabled === false ? h('div', { style: S.dim }, '全局自动聊天已关闭：当前会话即使允许回复，也不会自动回复。请到设置中开启全局开关。') : null,
+          replyState?.error ? h('div', { role: 'alert', style: { ...S.dim, color: 'var(--dsw-alias-state-error-primary)' } }, `${replyState.error}；状态未确认，请刷新后再操作。`) : null,
           错 ? h('div', { style: { ...S.dim, color: 'var(--dsw-alias-state-error-primary)' } }, 错) : null,
           h(
             'div',
@@ -1513,7 +1627,6 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', gap: 8, marginTop: 8 } },
-            h('button', { style: S.btn(false), onClick: 拉 }, '刷新'),
             h('button', { style: S.btn(true), onClick: 重启, disabled: restarting || !(info && info.managed) }, '重启机器人'),
           ),
           说 ? h('div', { style: { ...S.dim, marginTop: 6 } }, 说) : null,
@@ -1541,6 +1654,34 @@ window.__ModuleLoader__.load({
     }
 
     function Section() {
+      // Pure header selectors: unknown data must never look like confirmed QQ online.
+      function overviewHealth(view, error = '') {
+        const transport = view.status?.transport;
+        const http = transport?.http || 'unknown';
+        const ws = transport?.ws || 'unknown';
+        const result = (state, label) => ({ state, label, http, ws });
+        if (error) return result('unknown', '刷新失败 · 状态未确认');
+        if (view.control?.reachable === false || view.status?.ok === false) return result('offline', '控制接口离线');
+        if (view.control?.reachable !== true || !transport) return result('unknown', 'QQ 状态未知');
+        if (http === 'ok' && ws === 'open') return result('online', 'QQ 在线');
+        const knownHttp = http !== 'unknown';
+        const knownWs = ws !== 'unknown';
+        if (!knownHttp || !knownWs) return result('unknown', 'QQ 状态未确认');
+        if (http !== 'ok' && ws !== 'open' && !['connecting', 'reconnecting'].includes(ws)) return result('offline', 'QQ 连接离线');
+        return result('degraded', 'QQ 连接异常');
+      }
+      function overviewReasoning(llm) {
+        if (!llm) return '未知';
+        const value = llm.reasoningEfforts?.chat || llm.reasoningEffort || '';
+        return ({ none: '关闭 · none', minimal: '极低 · minimal', low: '低 · low', medium: '中 · medium', high: '高 · high', xhigh: '极高 · xhigh' })[value] || (value ? `未知档位 · ${value}` : '接口默认');
+      }
+      function overviewSource(view, name) {
+        const source = view.freshness?.[name];
+        const time = (at) => at ? new Date(at).toLocaleTimeString('zh-CN', { hour12: false }) : '无';
+        if (!source) return { ok: false, suffix: ' · 未验证', detail: '未提供实时刷新状态' };
+        return { ok: source.ok === true, suffix: source.ok ? '' : source.updatedAt ? ' · 旧值' : ' · 未知',
+          detail: `上次成功 ${time(source.updatedAt)} · 最近检查 ${time(source.checkedAt)}${source.ok ? '' : ` · 刷新失败：${source.error || '未知原因'}`}` };
+      }
       const { live, later } = useLifetime();
       const scopeRef = React.useRef('');
       const overviewId = React.useRef(0);
@@ -1562,6 +1703,7 @@ window.__ModuleLoader__.load({
       const [存话, 设存话] = React.useState('');
       const [保存忙, 设保存忙] = React.useState(false);
       const [学说, 设学说] = React.useState('');
+      const [社交说, 设社交说] = React.useState('');
       const [模型, 设模型] = React.useState([]);
       // 「学一遍」的现场状态：谁正在学（uin → 开始时间）、谁学完了（uin → 结果）
       const [学中, 设学中] = React.useState({});
@@ -1569,21 +1711,39 @@ window.__ModuleLoader__.load({
       const 学中Ref = React.useRef({});
       const [, 设滴答] = React.useState(0);
       const [页, 设页] = React.useState('setup');
+      const [刷新中, 设刷新中] = React.useState(false);
+      const 跳转目标 = React.useRef({});
       const tabId = React.useId();
+      const 跳转 = (page, section) => {
+        设页(page);
+        later(() => {
+          const target = 跳转目标.current[section];
+          target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+          target?.focus?.({ preventScroll: true });
+        }, 0);
+      };
+      const 锚点 = (name) => ({ ref: (node) => { 跳转目标.current[name] = node; }, tabIndex: -1, style: { scrollMarginTop: 12 } });
 
-      const 拉 = React.useCallback(async (selected = scopeRef.current) => {
+      const 拉 = React.useCallback(async (selected = scopeRef.current, force = false) => {
         // Delayed actions always refresh the currently selected scope, never their old closure.
         if (selected !== scopeRef.current) return;
         const id = ++overviewId.current;
-        const r = await get('/overview' + (selected ? `?scope=${encodeURIComponent(selected)}&limit=40` : '?limit=40'));
-        if (!live.current || id !== overviewId.current || selected !== scopeRef.current) return;
-        if (r.ok) {
-          设态(r); 设错('');
-          if (r.editable && !脏Ref.current && !保存中Ref.current) {
-            editableBaseline.current = JSON.parse(JSON.stringify(r.editable));
-            设草稿(JSON.parse(JSON.stringify(r.editable)));
-          }
-        } else 设错(r.error || '读不到数据');
+        设刷新中(true);
+        try {
+          const r = await get('/overview' + (selected ? `?scope=${encodeURIComponent(selected)}&limit=40` : '?limit=40') + (force ? '&refresh=1' : ''));
+          if (!live.current || id !== overviewId.current || selected !== scopeRef.current) return;
+          if (r.ok) {
+            设态(r); 设错('');
+            if (r.editable && !脏Ref.current && !保存中Ref.current) {
+              editableBaseline.current = JSON.parse(JSON.stringify(r.editable));
+              设草稿(JSON.parse(JSON.stringify(r.editable)));
+            }
+          } else 设错(r.error || '读不到数据');
+        } catch (error) {
+          if (live.current && id === overviewId.current && selected === scopeRef.current) 设错(String(error?.message || error));
+        } finally {
+          if (live.current && id === overviewId.current && selected === scopeRef.current) 设刷新中(false);
+        }
       }, []);
       React.useEffect(() => { 拉(scope); }, [拉, scope]);
       React.useEffect(() => {
@@ -1629,10 +1789,12 @@ window.__ModuleLoader__.load({
         设保存忙(true);
         设存话('保存中…');
         const updates = {};
+        const atomic = new Set((态?.configSchema || []).flatMap((group) => (group.fields || [])
+          .filter((field) => field.type === 'json').map((field) => field.path)));
         const diff = (base, next, prefix = '') => {
           for (const [key, value] of Object.entries(next || {})) {
             const path = prefix ? `${prefix}.${key}` : key;
-            if (value && typeof value === 'object' && !Array.isArray(value)) diff(base?.[key], value, path);
+            if (!atomic.has(path) && value && typeof value === 'object' && !Array.isArray(value)) diff(base?.[key], value, path);
             else if (JSON.stringify(value) !== JSON.stringify(base?.[key])) updates[path] = value;
           }
         };
@@ -1715,6 +1877,68 @@ window.__ModuleLoader__.load({
         later(() => 拉(), 1200);
       };
 
+      const 额度Ref = React.useRef({});
+      const 存社交额度 = async () => {
+        if (actionBusy.current) return;
+        actionBusy.current = true;
+        设忙(true);
+        设社交说('保存额度…');
+        const 评论 = Number(额度Ref.current.commentPerDay);
+        const 点赞 = Number(额度Ref.current.likePerDay);
+        const r = await post('/act', { kind: 'social-quota', commentPerDay: 评论, likePerDay: 点赞 });
+        actionBusy.current = false;
+        if (!live.current) return;
+        if (!r || r.ok === false) {
+          设社交说(`额度没存上：${(r && r.error) || '未知错误'}`);
+          设忙(false);
+          return;
+        }
+        const q = (r.result && r.result.quota) || {};
+        设社交说(`额度已生效：评论 ${q.commentPerDay ?? 评论}/天 · 点赞 ${q.likePerDay ?? 点赞}/天`);
+        设忙(false);
+        later(() => 拉(), 1200);
+      };
+
+      const 回滚人格 = async (id) => {
+        if (actionBusy.current) return;
+        actionBusy.current = true;
+        设忙(true);
+        const r = await post('/act', { kind: 'persona-undo', id });
+        actionBusy.current = false;
+        if (!live.current) return;
+        设忙(false);
+        if (!r || r.ok === false) {
+          设存话(`撤销失败：${(r && r.error) || '它后来又改过这段，先手动核对'}`);
+          later(() => 拉(), 800);
+          return;
+        }
+        设存话('已撤销那条人格微调');
+        later(() => 拉(), 700);
+      };
+
+      const 社交做 = async (kind) => {
+        if (actionBusy.current) return;
+        actionBusy.current = true;
+        设忙(true);
+        设社交说('请求中…');
+        const r = await post('/act', { kind });
+        actionBusy.current = false;
+        if (!live.current) return;
+        if (!r || r.ok === false) {
+          设社交说(`失败：${(r && r.error) || '未知错误'}`);
+          设忙(false);
+          return;
+        }
+        const out = r.result || {};
+        if (kind === 'social-login' && out.url) 设社交说(`用 B站 App 扫码，或手机打开：${out.url}`);
+        else if (kind === 'social-check') 设社交说(`查过 ${out.checked || 0} 条自己发过的评论，新增 ${out.added || 0} 条回复`);
+        else if (out.skipped) 设社交说(`这轮跳过：${out.skipped}`);
+        else if (out.action) 设社交说(`这轮：${out.action}${out.text ? `「${out.text}」` : ''}`);
+        else 设社交说('已交给机器人');
+        设忙(false);
+        later(() => 拉(), 1600);
+      };
+
       // Setup must remain reachable on first run even if /overview is unavailable.
       const overviewReady = Boolean(态);
       const view = 态 || {};
@@ -1737,7 +1961,18 @@ window.__ModuleLoader__.load({
       const archive = Array.isArray(view.archive) ? view.archive : [];
       const scopes = Array.isArray(view.scopes) ? view.scopes : [];
       const messages = Array.isArray(view.messages) ? view.messages : [];
-      const online = Boolean(view.control && view.control.reachable);
+      const health = overviewHealth(view, 错);
+      const online = health.state === 'online';
+      const identityLive = overviewSource(view, 'identity');
+      const groupLive = overviewSource(view, 'groups');
+      const statusLive = overviewSource(view, 'status');
+      const configLive = overviewSource(view, 'config');
+      const sourceNames = { status: '运行状态', identity: 'QQ昵称', groups: '群列表', friends: '好友列表', scopes: '会话列表', config: '设置', people: '人物档案', decisions: '决策记录', dailyNews: '资讯订阅' };
+      const failedSources = Object.entries(view.freshness || {}).filter(([, value]) => value?.ok === false);
+      const 标头入口 = (label, page, section, title) => h('button', {
+        type: 'button', className: 'qq-header-link', style: { ...S.pill(), cursor: 'pointer', font: 'inherit', fontSize: 11.5 },
+        title, 'aria-label': title, onClick: () => 跳转(page, section),
+      }, label, ' ↗');
 
       const 主页 = !overviewReady ? h('div', { style: S.wrap },
         h('div', { role: 错 ? 'alert' : 'status', style: S.dim }, 错 || '读取中…'),
@@ -1750,20 +1985,27 @@ window.__ModuleLoader__.load({
           'div',
           { style: S.head },
           h('h1', { style: S.h1 }, 'QQ 机器人'),
-          h('span', { style: S.pill(online ? 'ok' : 'bad') }, online ? '在线' : '掉线'),
-          h('span', { style: S.pill() }, st.selfId ? `${st.nickname || ''} ${st.selfId}` : '账号未知'),
-          h('span', { style: S.pill() }, `运行 ${Math.round((st.uptimeMs || 0) / 60000)} 分钟`),
-          h('span', { style: S.pill() }, `模型 ${(view.llm && view.llm.models && view.llm.models.chat) || (view.llm && view.llm.model) || '?'}`),
-          h('span', { style: S.pill() }, `群 ${st.groups ?? groups.length}`),
-          h('span', { style: S.pill() }, `主动开口 ${(view.editable?.agent?.targets || []).length} 处`),
-          h('span', { style: S.pill() }, `人设 ${st.persona || '?'}`),
+          h('span', { role: 'status', style: { ...S.pill(online ? 'ok' : health.state === 'offline' ? 'bad' : ''), ...(health.state === 'degraded' ? { color: T.warn } : {}) } }, health.label),
+          h('span', { style: S.pill(), title: `QQ 账号昵称（不是人设）；${identityLive.detail}` }, (st.selfId ? `QQ昵称 ${st.nickname || '未知'} · ${st.selfId}` : 'QQ账号未知') + identityLive.suffix),
+          h('span', { style: S.pill(), title: statusLive.detail }, `运行 ${st.uptimeMs == null ? '未知' : `${Math.round(st.uptimeMs / 60000)} 分钟`}${statusLive.suffix}`),
+          标头入口(`聊天模型 ${st.model || '未知'}${statusLive.suffix}`, 'settings', 'model', `打开模型设置（不修改当前模型）；${statusLive.detail}`),
+          标头入口(`聊天推理 ${overviewReasoning(view.editable?.llm)}${configLive.suffix}`, 'settings', 'model', `打开已保存的推理档位设置；${configLive.detail}`),
+          标头入口(`群 ${Array.isArray(view.groups) ? groups.length : '未知'}${groupLive.suffix}`, 'main', 'groups', `查看已加入的群；${groupLive.detail}`),
+          标头入口(`主动目标 ${Array.isArray(view.editable?.agent?.targets) ? `${view.editable.agent.targets.length} 处` : '未知'}${configLive.suffix}`, 'settings', 'targets', '设置主动活动范围（不是正在执行的任务数）'),
+          标头入口(`人设 ${st.persona || '未知'}${statusLive.suffix}`, 'settings', 'persona', '打开人设设置（与 QQ 昵称分别配置）'),
           h(
             'span',
             { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
-            h('button', { style: S.btn(false), onClick: () => 拉(scope) }, '刷新'),
+            h('button', { type: 'button', style: S.btn(false), disabled: 刷新中, onClick: () => 拉(scope, true) }, 刷新中 ? '刷新中…' : '刷新'),
           ),
+          h('div', { style: { ...S.dim, flexBasis: '100%', display: 'flex', gap: 10, flexWrap: 'wrap' }, 'aria-live': 'polite' },
+            h('span', null, `HTTP ${health.http} · WS ${health.ws}${错 ? '（上次记录，未确认）' : ''}`),
+            h('span', null, `上次读取 ${view.now ? new Date(view.now).toLocaleTimeString('zh-CN', { hour12: false }) : '未知'} · 每15秒刷新${刷新中 ? ' · 正在刷新…' : ''}${错 ? ' · 读取失败，以下为上次数据' : ''}`)),
         ),
         错 ? h('div', { style: { ...S.dim, color: 'var(--dsw-alias-state-error-primary)', marginBottom: 10 } }, 错) : null,
+        h('details', { style: { ...S.dim, marginBottom: 10 }, open: failedSources.length ? true : undefined },
+          h('summary', null, failedSources.length ? `部分数据刷新失败（${failedSources.map(([name]) => sourceNames[name] || name).join('、')}），保留上次成功值；没有旧值则显示未知` : '数据来源与刷新时间（实时状态 / QQ 名册 / 已保存设置分别读取）'),
+          ...Object.entries(sourceNames).map(([name, label]) => h('div', { key: name }, `${label}：${overviewSource(view, name).detail}`))),
 
         // 今日战绩
         h(
@@ -1804,10 +2046,123 @@ window.__ModuleLoader__.load({
           ),
         ),
 
+        view.social
+          ? h(
+              'div',
+              { style: S.card },
+              h('h2', { style: S.h2 }, '视频社交'),
+              (() => {
+                const so = view.social;
+                const bili = so.bili || {};
+                const q = so.quota || {};
+                const t = so.today || {};
+                return h(
+                  'div',
+                  { style: { ...S.dim, marginBottom: 8, lineHeight: 1.7 } },
+                  h('div', null, `B站：${bili.loggedIn ? `已登录${bili.name ? `（${bili.name}）` : ''}` : '未登录（只能看，不能点赞/评论）'} · 今天评论 ${t.comments || 0} 条、点赞 ${t.likes || 0} 个`),
+                  h('div', null, `额度：评论剩 ${q.commentsLeft ?? '?'} · 点赞剩 ${q.likesLeft ?? '?'}${q.readyInMs > 0 ? ` · 距下次可动手 ${Math.ceil(q.readyInMs / 60000)} 分钟` : ''}${q.quiet ? ' · 安静时段' : ''}`),
+                  h('div', null, `关注动态：${bili.loggedIn ? '每轮先看关注的人发的新视频' : '登录后才读'}`),
+                  h('div', null, `收到回复：${so.received ? `${so.received} 条（QQ 那边也会知道）${so.replies?.[0] ? ` · 最新 ${so.replies[0].user || '某人'}：${String(so.replies[0].content || '').slice(0, 24)}` : ''}` : '还没有'}`),
+                  so.wishes?.[0] ? h('div', null, `最近想要：${so.wishes.map((w) => w.what).join('、')}（QQ 聊天里会偶尔撒娇提一句）`) : null,
+                  h('div', null, `蒸馏：${so.feed?.pending ? `${so.feed.pending} 条刷到的内容待学` : '刷到的知识会攒着，够一批就蒸馏成笔记'}`),
+                );
+              })(),
+              (() => {
+                const so = view.social;
+                const 时 = (at) => {
+                  const n = Number(at) || 0;
+                  if (!n) return '';
+                  const d = new Date(n);
+                  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                };
+                const 说过 = (so.acted || []).filter((x) => x.text).slice(0, 6);
+                const 收到 = (so.replies || []).slice(0, 6);
+                const 小字 = { ...S.dim, fontSize: 12, lineHeight: 1.5 };
+                const 块 = { borderTop: '1px solid var(--dsw-alias-border-l2)', paddingTop: 8, marginTop: 8 };
+                const 条 = { padding: '6px 0', borderBottom: '1px dashed var(--dsw-alias-border-l2)' };
+                const 链接 = (aid) => (aid ? `https://www.bilibili.com/video/av${aid}` : '');
+                if (!说过.length && !收到.length) return h('div', { style: { ...S.dim, marginTop: 8 } }, '还没在 B站 说过话，也没人回它。');
+                return h(
+                  'div',
+                  { style: { marginTop: 4 } },
+                  说过.length
+                    ? h(
+                        'div',
+                        { style: 块 },
+                        h('div', { style: { ...S.dim, fontWeight: 600, marginBottom: 4 } }, `它在 B站 说过（最近 ${说过.length} 条）`),
+                        ...说过.map((x) =>
+                          h(
+                            'div',
+                            { key: x.id, style: 条 },
+                            h(
+                              'div',
+                              { style: 小字 },
+                              `${时(x.at)} · ${x.action === 'reply' ? '回评' : '评论'} · ${x.title || '视频'}`,
+                              x.aid ? h('a', { href: 链接(x.aid), target: '_blank', rel: 'noreferrer', style: { marginLeft: 6, color: 'var(--dsw-alias-fg-link)' } }, '看视频') : null,
+                            ),
+                            h('div', { style: { marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, x.text),
+                          ),
+                        ),
+                      )
+                    : null,
+                  收到.length
+                    ? h(
+                        'div',
+                        { style: 块 },
+                        h('div', { style: { ...S.dim, fontWeight: 600, marginBottom: 4 } }, `B站 回它的（最近 ${收到.length} 条，QQ 那边也会知道）`),
+                        ...收到.map((r) =>
+                          h(
+                            'div',
+                            { key: r.id, style: 条 },
+                            h(
+                              'div',
+                              { style: 小字 },
+                              `${时(r.at)} · ${r.user || '某人'} 在《${r.video || '视频'}》下回：`,
+                              r.aid ? h('a', { href: 链接(r.aid), target: '_blank', rel: 'noreferrer', style: { marginLeft: 6, color: 'var(--dsw-alias-fg-link)' } }, '看视频') : null,
+                            ),
+                            h('div', { style: { marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, r.content || ''),
+                          ),
+                        ),
+                      )
+                    : null,
+                );
+              })(),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 } },
+                h('span', { style: S.dim }, '每日上限：评论'),
+                h('input', {
+                  type: 'number', min: 0, max: 50, defaultValue: view.social.quota?.commentPerDay ?? 12,
+                  'aria-label': '每天最多评论几条',
+                  style: { width: 66, padding: '2px 6px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'transparent', color: 'inherit' },
+                  onChange: (e) => { 额度Ref.current.commentPerDay = e.target.value; },
+                }),
+                h('span', { style: S.dim }, '条 · 点赞'),
+                h('input', {
+                  type: 'number', min: 0, max: 100, defaultValue: view.social.quota?.likePerDay ?? 32,
+                  'aria-label': '每天最多点赞几个',
+                  style: { width: 66, padding: '2px 6px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'transparent', color: 'inherit' },
+                  onChange: (e) => { 额度Ref.current.likePerDay = e.target.value; },
+                }),
+                h('span', { style: S.dim }, '个'),
+                h('button', { style: S.btn(false), disabled: 忙, onClick: 存社交额度 }, '保存额度'),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                h('button', { style: S.btn(true), disabled: 忙, onClick: () => 社交做('social-tick') }, '现在刷一轮'),
+                h('button', { style: S.btn(false), disabled: 忙, onClick: () => 社交做('social-check') }, '查新回复'),
+                view.social.bili?.loggedIn
+                  ? h('button', { style: S.btn(false), disabled: 忙, onClick: () => 社交做('social-logout') }, '退出 B站 登录')
+                  : h('button', { style: S.btn(false), disabled: 忙, onClick: () => 社交做('social-login') }, '扫码登录 B站'),
+              ),
+              社交说 ? h('div', { style: { ...S.dim, marginTop: 8, wordBreak: 'break-all' } }, 社交说) : null,
+              h('div', { style: { ...S.dim, marginTop: 6 } }, '评论发出去了撤不回，所以额度、间隔、安静时段都在代码里兜底；演练模式只记录不发。'),
+            )
+          : null,
+
         ),
         h('div', { hidden: 页 !== 'settings' },
-        h(ConfigPanel, { schema: view.configSchema, onSaved: () => 拉() }),
-
         h(DailyNewsPanel, { config: 草稿?.dailyNews, status: view.dailyNews, error: view.dailyNewsError,
           groups, draftTargets: 草稿?.agent?.targets, savedTargets: view.editable?.agent?.targets,
           change: 改, dirty: 脏, saving: 保存忙, save: 存, message: 存话 }),
@@ -1840,8 +2195,8 @@ window.__ModuleLoader__.load({
           ? h(
               'div',
               { style: S.card },
-              h('h2', { style: S.h2 }, '设置'),
-              h('div', { style: 说明 }, '改完点下面保存，机器人会重启一次（约 3 秒），设置立即生效。'),
+              h('h2', { style: S.h2 }, '常用设置'),
+              h('div', { style: 说明 }, '与上方每日资讯共用保存和撤销；改完统一保存，只重启机器人一次（约 3 秒）。'),
 
               h('div', { style: { height: 10 } }),
 
@@ -1867,9 +2222,9 @@ window.__ModuleLoader__.load({
                   { style: 行 },
                   h('span', { style: 标签 }, '两次之间至少'),
                   数字(
-                    Math.round((草稿.agent?.minGapMs || 0) / 60000),
-                    (v) => 改('agent.minGapMs', Number(v || 0) * 60000),
-                    { min: 0, 后缀: '分钟' },
+                    (草稿.agent?.minGapMs || 0) / 60000,
+                    (v) => 改('agent.minGapMs', Math.round(Number(v || 0) * 60000)),
+                    { min: 0, max: 1440, step: 1 / 60000, 后缀: '分钟' },
                   ),
                 ),
                 h(
@@ -1898,16 +2253,16 @@ window.__ModuleLoader__.load({
                   'div',
                   { style: 行 },
                   h('span', { style: 标签 }, '分享间隔'),
-                  数字(草稿.agent?.shareEveryHours, (v) => 改('agent.shareEveryHours', v), { min: 1, 后缀: '小时' }),
+                  数字(草稿.agent?.shareEveryHours, (v) => 改('agent.shareEveryHours', v), { min: 0, max: 240, 后缀: '小时' }),
                   h('span', { style: 说明 }, '说说间隔'),
-                  数字(草稿.agent?.qzoneEveryHours, (v) => 改('agent.qzoneEveryHours', v), { min: 1, 后缀: '小时' }),
+                  数字(草稿.agent?.qzoneEveryHours, (v) => 改('agent.qzoneEveryHours', v), { min: 0, max: 240, 后缀: '小时' }),
                 ),
               ),
 
               h(
                 'div',
                 { style: 分组 },
-                h('div', { style: 组名 }, '安全与活动范围'),
+                h('div', { ...锚点('targets'), style: { ...组名, scrollMarginTop: 12 } }, '安全与活动范围'),
                 h(
                   'div',
                   { style: 行 },
@@ -1966,6 +2321,7 @@ window.__ModuleLoader__.load({
                       '在哪儿主动说话 · 列表每分钟自动刷新，新进的群、新加的好友、来私聊的陌生人都会自己出现'),
                     块('群', 群),
                     块('私聊', [...好友, ...其他私聊]),
+                    h(JsonValueEditor, { value: 草稿.agent?.targets || [], label: '活动目标 JSON', onChange: (v) => 改('agent.targets', v) }),
                   );
                 })(),
               ),
@@ -1978,8 +2334,8 @@ window.__ModuleLoader__.load({
                   'div',
                   { style: 行 },
                   h('span', { style: 标签 }, '群聊接话概率'),
-                  数字(草稿.chat?.randomInterject?.chance != null ? Math.round(草稿.chat.randomInterject.chance * 100) : 0,
-                    (v) => 改('chat.randomInterject.chance', Math.max(0, Math.min(100, Number(v) || 0)) / 100), { min: 0, max: 100, 后缀: '%' }),
+                  数字(草稿.chat?.randomInterject?.chance != null ? 草稿.chat.randomInterject.chance * 100 : 0,
+                    (v) => 改('chat.randomInterject.chance', Math.max(0, Math.min(100, Number(v) || 0)) / 100), { min: 0, max: 100, step: 0.01, 后缀: '%' }),
                   h('span', { style: { ...S.dim, fontSize: 11 } }, '群里别人普通聊天时，掷中才接（掷中后还会由模型判断值不值得回）'),
                 ),
                 h(
@@ -2010,7 +2366,7 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { style: 分组 },
-                h('div', { style: 组名 }, '模型'),
+                h('div', { ...锚点('model'), style: { ...组名, scrollMarginTop: 12 } }, '模型'),
                 h('datalist', { id: 'qq-models' }, ...模型.map((m) => h('option', { key: m, value: m }))),
                 h(
                   'div',
@@ -2034,11 +2390,12 @@ window.__ModuleLoader__.load({
                   文本(草稿.llm?.models?.agent, (v) => 改('llm.models.agent', v), { width: 210 }),
                   h('span', { style: 说明 }, '蒸馏模型在「学习 · 蒸馏与检索」里单独配'),
                 ),
+                h(ReasoningEffortFields, { llm: 草稿.llm, onChange: 改 }),
                 h(
                   'div',
                   { style: 行 },
                   h('span', { style: 标签 }, '单次最多 token'),
-                  数字(草稿.llm?.maxTokens, (v) => 改('llm.maxTokens', v), { min: 200, step: 100 }),
+                  数字(草稿.llm?.maxTokens, (v) => 改('llm.maxTokens', v), { min: 64, max: 32768, step: 1 }),
                   h('span', { style: 说明 }, '创造力 temperature'),
                   数字(草稿.llm?.temperature, (v) => 改('llm.temperature', v), { min: 0, max: 2, step: 0.05 }),
                 ),
@@ -2052,15 +2409,15 @@ window.__ModuleLoader__.load({
                   'div',
                   { style: 行 },
                   h('span', { style: 标签 }, '它自己会挑的话题'),
-                  文本((草稿.share?.interests || []).join('、'), (v) => 改('share.interests', v.split(/[、,，]/).map((x) => x.trim()).filter(Boolean)), { width: 380 }),
+                  h(JsonValueEditor, { value: 草稿.share?.interests || [], label: '分享兴趣 JSON', onChange: (v) => 改('share.interests', v) }),
                 ),
                 h(
                   'div',
                   { style: 行 },
                   h('span', { style: 标签 }, '来源'),
-                  ...['bilibili', 'zhihu', 'tieba', 'toutiao'].map((src) => {
+                  ...[...new Set(['bilibili', 'zhihu', 'tieba', 'toutiao', ...(草稿.share?.sources || [])])].map((src) => {
                     const on = (草稿.share?.sources || []).includes(src);
-                    const label = { bilibili: 'B站', zhihu: '知乎', tieba: '贴吧', toutiao: '头条' }[src];
+                    const label = { bilibili: 'B站', zhihu: '知乎', tieba: '贴吧', toutiao: '头条' }[src] || src;
                     return h(
                       'label',
                       { key: src, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, cursor: 'pointer' } },
@@ -2077,12 +2434,13 @@ window.__ModuleLoader__.load({
                     );
                   }),
                 ),
+                h(JsonValueEditor, { value: 草稿.share?.sources || [], label: '分享来源 JSON', onChange: (v) => 改('share.sources', v) }),
               ),
 
               h(
                 'div',
                 { style: 分组 },
-                h('div', { style: 组名 }, '人设'),
+                h('div', { ...锚点('persona'), style: { ...组名, scrollMarginTop: 12 } }, '人设'),
                 h(
                   'div',
                   { style: 行 },
@@ -2094,7 +2452,7 @@ window.__ModuleLoader__.load({
                   'div',
                   { style: 行 },
                   h('span', { style: 标签 }, '性格关键词'),
-                  文本((草稿.persona?.likes || []).join('、'), (v) => 改('persona.likes', v.split(/[、,，]/).map((x) => x.trim()).filter(Boolean)), { width: 380 }),
+                  h(JsonValueEditor, { value: 草稿.persona?.likes || [], label: '性格关键词 JSON', onChange: (v) => 改('persona.likes', v) }),
                 ),
                 h(
                   'div',
@@ -2119,6 +2477,22 @@ window.__ModuleLoader__.load({
                   }),
                   h('div', { style: { ...说明, marginTop: 4 } }, `当前 ${(草稿.persona?.systemPrompt || '').length} 字。这段会原样塞进模型，改完保存即生效。`),
                 ),
+                h(
+                  'div',
+                  { style: { marginTop: 10 } },
+                  h('div', { style: { ...标签, marginBottom: 4 } }, '它自己改过的地方（蒸馏之后，最多一天一次）'),
+                  (view.personaEvolve?.history || []).length
+                    ? (view.personaEvolve.history || []).map((rec) => h(
+                        'div',
+                        { key: rec.id, style: { ...说明, display: 'flex', gap: 8, alignItems: 'flex-start', padding: '3px 0' } },
+                        h('span', { style: { flex: 1 } },
+                          `${new Date(rec.at).toLocaleString('zh-CN', { hour12: false })} · ` +
+                          [rec.styleAdd ? `说话「${rec.styleAdd}」` : '', rec.rule ? `规矩「${rec.rule}」` : ''].filter(Boolean).join(' · ') +
+                          (rec.reason ? `（${rec.reason}）` : '')),
+                        h('button', { style: S.btn(false), disabled: 忙, onClick: () => 回滚人格(rec.id) }, '撤销'),
+                      ))
+                    : h('div', { style: 说明 }, '还没有自己改过。'),
+                ),
               ),
 
               存话 ? h('div', { style: { ...说明, color: /失败/.test(存话) ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } }, 存话) : null,
@@ -2137,7 +2511,7 @@ window.__ModuleLoader__.load({
                         background: 'var(--dsw-alias-bg-layer-1)',
                       },
                     },
-                    h('span', { style: { fontSize: 12.5, color: 'var(--dsw-alias-state-warn-primary)' } }, '⚠ 有改动还没保存'),
+                    h('span', { style: { fontSize: 12.5, color: 'var(--dsw-alias-state-warn-primary)' } }, '有未保存修改（常用设置与资讯共用）'),
                     h('button', { style: S.btn(true), disabled: 保存忙, onClick: 存 }, 保存忙 ? '保存中…' : '保存并重启机器人'),
                     h('button', { style: S.btn(false), disabled: 保存忙, onClick: () => { 草稿版本Ref.current += 1; 设草稿(JSON.parse(JSON.stringify(view.editable))); editableBaseline.current = JSON.parse(JSON.stringify(view.editable)); 置脏(false); 设存话(''); } }, '撤销'),
                   )
@@ -2146,6 +2520,11 @@ window.__ModuleLoader__.load({
           : null,
 
         ),
+
+        h('div', { hidden: 页 !== 'settings' },
+          h('details', { style: S.card },
+            h('summary', { style: { cursor: 'pointer', fontWeight: 600 } }, '高级设置 · 连接、能力与学习参数'),
+            h(ConfigPanel, { schema: 高级配置组(view.configSchema), onSaved: () => 拉() }))),
 
         // 最近决策
         h('div', { hidden: 页 !== 'main' },
@@ -2188,7 +2567,8 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: S.card },
-          h('h2', { style: S.h2 }, '群'),
+          h('h2', { ...锚点('groups'), style: { ...S.h2, scrollMarginTop: 12 } }, '群'),
+          h('div', { style: S.dim }, `${groupLive.detail} · 自动轮询最多缓存60秒，手动刷新立即重查${!groupLive.ok ? '；下面如有列表为旧值，不代表当前名册' : groups.length ? '' : '；当前未加入群'}`),
           h(
             'div',
             { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: messages.length ? 12 : 0 } },
@@ -2240,7 +2620,7 @@ window.__ModuleLoader__.load({
           h('div', { style: { ...S.dim, marginBottom: 8 } },
             决策.today
               ? `今天说话了 ${决策.today.acted} 次，沉默 ${决策.today.silent} 次。下面按原因排，次数多的在前。`
-              : '还没有记录——它每做一次决定（说 / 不说）都会记一笔。'),
+              : view.freshness?.decisions?.ok === false ? '决策记录读取失败，不能判断是否已有记录。' : '还没有记录——它每做一次决定（说 / 不说）都会记一笔。'),
           原因.length
             ? h(
                 'table',
@@ -2280,7 +2660,7 @@ window.__ModuleLoader__.load({
           h('div', { style: { ...S.dim, marginBottom: 8 } }, '它会给跟它说过话的人建档案：谁、在干嘛、爱聊什么。攒够 10 条新话、且距上次满 3 小时就自动学一次，也能手动学。'),
           学说 ? h('div', { style: { ...S.dim, marginBottom: 8, color: /✘/.test(学说) ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary)' } }, 学说) : null,
           people.length === 0
-            ? h('div', { style: S.dim }, '还不认识谁——等群里有人说几句话，或者点下面的按钮让它先学一遍。')
+            ? h('div', { style: S.dim }, view.freshness?.people?.ok === false ? '人物档案读取失败，不能判断是否已有档案。' : '还不认识谁——等群里有人说几句话，或者点下面的按钮让它先学一遍。')
             : h(
                 'div',
                 null,
@@ -2387,8 +2767,9 @@ window.__ModuleLoader__.load({
           id: `${tabId}-${key}`, 'aria-controls': `${tabId}-${key}-panel`, 'aria-selected': 页 === key, tabIndex: 页 === key ? 0 : -1,
           className: 'qq-tab', onClick: () => 设页(key) }, label)));
       return h('div', { className: 'qq-panel', style: { minWidth: 0, color: T.text } },
-        h('style', null, `.qq-panel *{box-sizing:border-box}.qq-panel button,.qq-panel input,.qq-panel select,.qq-panel textarea{accent-color:var(--dsw-alias-state-business-primary)}.qq-panel button:disabled{opacity:.5;cursor:not-allowed}.qq-panel button:focus-visible,.qq-panel input:focus-visible,.qq-panel textarea:focus-visible,.qq-panel select:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.qq-tabs{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);margin-bottom:16px;overflow:auto}.qq-tab{font:inherit;white-space:nowrap;padding:9px 12px;border:0;border-bottom:2px solid transparent;color:var(--dsw-alias-label-secondary);background:transparent;cursor:pointer}.qq-tab[aria-selected=true]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.qq-tab:hover{background:var(--dsw-alias-interactive-bg-hover)}.qq-panel [hidden]{display:none!important}.qq-panel table{max-width:100%}.qq-panel select,.qq-panel option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}@media(max-width:600px){.qq-chat-list{max-height:180px!important}.qq-panel td,.qq-panel th{overflow-wrap:anywhere}}`),
+        h('style', null, `.qq-panel *{box-sizing:border-box}.qq-panel button,.qq-panel input,.qq-panel select,.qq-panel textarea{accent-color:var(--dsw-alias-state-business-primary)}.qq-panel button:disabled{opacity:.5;cursor:not-allowed}.qq-panel button:focus-visible,.qq-panel input:focus-visible,.qq-panel textarea:focus-visible,.qq-panel select:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.qq-tabs{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);margin-bottom:16px;overflow:auto}.qq-tab{font:inherit;white-space:nowrap;padding:9px 12px;border:0;border-bottom:2px solid transparent;color:var(--dsw-alias-label-secondary);background:transparent;cursor:pointer}.qq-tab[aria-selected=true]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:600}.qq-tab:hover{background:var(--dsw-alias-interactive-bg-hover)}.qq-header-link:hover{background:var(--dsw-alias-interactive-bg-hover)!important;text-decoration:underline}.qq-panel [hidden]{display:none!important}.qq-panel table{max-width:100%}.qq-panel select,.qq-panel option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}@media(max-width:600px){.qq-chat-list{max-height:180px!important}.qq-panel td,.qq-panel th{overflow-wrap:anywhere}}`),
         条,
+        failedSources.length && 页 !== 'main' ? h('div', { role: 'status', style: { ...S.dim, color: T.warn, marginBottom: 10 } }, `部分数据刷新失败：${failedSources.map(([name]) => `${sourceNames[name] || name}（${overviewSource(view, name).detail}）`).join('；')}。已保留上次成功数据，当前设置草稿不会被覆盖。`) : null,
         h('div', { role: 'tabpanel', id: `${tabId}-setup-panel`, 'aria-labelledby': `${tabId}-setup`, hidden: 页 !== 'setup', tabIndex: 0 },
           h(SetupPanel, { onOps: () => 设页('ops'), onSaved: () => 拉(), active: 页 === 'setup' })),
         ...页签.filter(([key]) => key === 'chats' || key === 'ops').map(([key]) => h('div', { key, role: 'tabpanel', id: `${tabId}-${key}-panel`, 'aria-labelledby': `${tabId}-${key}`, hidden: 页 !== key, tabIndex: 0 },

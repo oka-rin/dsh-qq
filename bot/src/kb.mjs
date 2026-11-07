@@ -42,6 +42,23 @@ export function normalizeEntry(raw) {
   };
 }
 
+// 通用聊天词不能把整座梗库拉进来；只做词面检索，不猜语义、不拿热榜兜底。
+const CONTEXT_STOP = new Set(('这个 那个 什么 怎么 为什么 觉得 知道 现在 今天 刚才 最近 自己 我们 你们 他们 不是 就是 还是 可以 没有 真的 一下 一点 一个 这种 那种 时候 东西 事情 朋友 群友 哈哈 哈哈哈 笑死 好像 有点 这里 那里 表情 图片 视频 回复 说话 聊天 网络 网友 使用 用于 适合 表示 形容 调侃 吐槽').split(' '));
+const CONTEXT_SEGMENTER = new Intl.Segmenter('zh', { granularity: 'word' });
+const contextText = (value) => (Array.isArray(value) ? value.map((v) => typeof v === 'string' ? v : v?.text || '').join('\n') : String(value ?? '')).normalize('NFKC').toLowerCase();
+const contextTokens = (text) => [...new Set([...CONTEXT_SEGMENTER.segment(contextText(text))]
+  .filter((s) => s.isWordLike).map((s) => s.segment)
+  .filter((s) => !CONTEXT_STOP.has(s) && !/^\d+$/.test(s) && (/\p{Script=Han}/u.test(s) ? s.length >= 2 : s.length >= 3)))];
+const mentionsName = (text, name) => {
+  const needle = contextText(name).trim();
+  if (needle.length < 2 || CONTEXT_STOP.has(needle)) return false;
+  if (/^[a-z0-9_ -]+$/i.test(needle)) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<![a-z0-9_])${escaped}(?![a-z0-9_])`, 'i').test(text);
+  }
+  return text.includes(needle);
+};
+
 export class MemeKB {
   constructor({ dataDir = 'data', log } = {}) {
     this.dir = path.resolve(dataDir, 'kb');
@@ -193,6 +210,54 @@ export class MemeKB {
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map((h) => h.row);
+  }
+
+  /** 只取当前话题用得上的条目；budget 是返回数组 JSON 的字符上限，不改库里原文。 */
+  relevant(context, { limit = 4, budget = 600 } = {}) {
+    this.load();
+    const text = contextText(context).slice(-4000).trim();
+    const maxRows = Math.max(0, Math.min(20, Math.floor(Number(limit) || 0)));
+    const maxChars = Math.max(0, Math.floor(Number(budget) || 0));
+    if (!text || !maxRows || maxChars < 16) return [];
+    const tokens = contextTokens(text);
+    const entries = [...this.map.values()];
+    // 在大部分条目里都出现的词也是模板词，不能算话题证据。
+    const tokenSets = entries.map((r) => new Set(contextTokens(`${r.name} ${r.meaning || ''} ${r.usage || ''} ${r.example || ''} ${(r.tags || []).join(' ')}`)));
+    const frequency = new Map();
+    for (const set of tokenSets) for (const token of set) frequency.set(token, (frequency.get(token) || 0) + 1);
+    const ranked = [];
+    for (let i = 0; i < entries.length; i += 1) {
+      const row = entries[i];
+      const exact = mentionsName(text, row.name);
+      const matched = tokens.filter((token) => tokenSets[i].has(token)
+        && !(entries.length >= 8 && frequency.get(token) / entries.length > 0.6));
+      const strong = matched.some((token) => /\p{Script=Han}/u.test(token) ? token.length >= 3 : token.length >= 4);
+      // 单个泛化双字词不够，除非是明确的梗名。
+      if (!exact && !strong && matched.length < 2) continue;
+      const score = (exact ? 10000 + contextText(row.name).length * 10 : 0)
+        + matched.reduce((n, token) => n + token.length * 10 + Math.log2(1 + entries.length / (frequency.get(token) || 1)), 0);
+      ranked.push({ row, score });
+    }
+    ranked.sort((a, b) => b.score - a.score || (b.row.heat || 0) - (a.row.heat || 0));
+    const out = [];
+    for (const { row } of ranked) {
+      if (out.length >= maxRows) break;
+      const pick = { name: clean(row.name, NAME_MAX) };
+      // 留空间给例句与用法，不让一个长释义吃光全部预算。
+      for (const [key, cap] of [['meaning', 100], ['usage', 80], ['example', 100]]) {
+        const value = clean(row[key], cap);
+        if (value) pick[key] = value;
+      }
+      while (JSON.stringify([...out, pick]).length > maxChars) {
+        const key = ['meaning', 'usage', 'example'].filter((k) => pick[k])
+          .sort((a, b) => pick[b].length - pick[a].length)[0];
+        if (!key) break;
+        if (pick[key].length <= 16) delete pick[key];
+        else pick[key] = pick[key].slice(0, Math.max(8, pick[key].length - Math.max(8, JSON.stringify([...out, pick]).length - maxChars)));
+      }
+      if (JSON.stringify([...out, pick]).length <= maxChars) out.push(pick);
+    }
+    return out;
   }
 
   /** 给模型看的简报：名字 + 一句含义 */

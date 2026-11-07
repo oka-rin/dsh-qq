@@ -75,6 +75,29 @@ export function parseNotes(raw) {
   return out;
 }
 
+/** 刷视频的笔记：允许在行首标 [行为] / [口头禅]，分别学「怎么做」和「怎么说」 */
+export function parseFeedNotes(raw) {
+  const out = [];
+  for (const line of String(raw ?? '').split('\n')) {
+    let t = line.replace(/^[-*·\d.、)\s]+/u, '').trim();
+    if (!t || t === '无') continue;
+    let kind = 'feed';
+    const m = t.match(/^[\[【(（]?\s*(行为|口头禅|说法|想要)\s*[\]】)）]?\s*[:：]?\s*/u);
+    if (m) {
+      kind = m[1] === '口头禅' ? 'phrase' : m[1] === '想要' ? 'want' : 'behavior';
+      t = t.slice(m[0].length).trim();
+    }
+    if (!t) continue;
+    if (kind === 'want') {
+      const text = clean(t.split('|')[0]);
+      if ([...text].length >= 2) out.push({ text, tags: [], kind });
+      continue;
+    }
+    for (const note of parseNotes(t)) out.push({ ...note, kind });
+  }
+  return out;
+}
+
 export class LearnBook {
   constructor({ dataDir = 'data', log, maxNotes = MAX_NOTES, embedder = null } = {}) {
     this.dir = ensureDir(path.resolve(dataDir, 'learn'));
@@ -367,6 +390,22 @@ export class LearnBook {
     return lines.join('\n');
   }
 
+  byKind(kind, limit = 6) {
+    const now = Date.now();
+    return [...this.db.allNotes()]
+      .filter((n) => n.kind === kind)
+      .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0) || (Number(b.weight) || 1) - (Number(a.weight) || 1))
+      .slice(0, Math.max(1, Number(limit) || 6))
+      .map((n) => ({
+        id: n.id,
+        kind: n.kind,
+        text: n.text,
+        tags: n.tags,
+        weight: n.weight,
+        ageHours: Math.round((now - (n.createdAt || now)) / 3600_000),
+      }));
+  }
+
   top(limit = 12) {
     const now = Date.now();
     return [...this.db.allNotes()]
@@ -434,6 +473,30 @@ const WEB_ASK = (material, topic) =>
     material,
   ].join('\n');
 
+const FEED_SYSTEM = '你在回看自己刚刷过的 B站 视频和评论区，学的不只是知识，还有视频里的行为方式和说话习惯。只输出规定格式，不要寒暄。';
+
+const FEED_ASK = (material) =>
+  [
+    '下面是你刚在 B站 刷到的视频（标题/简介/热门评论）。把其中有长期价值的东西变成你自己的笔记。',
+    '',
+    '分三类写：',
+    '- 知识：视频里讲的硬知识、数码/游戏/生活常识（要具体）',
+    '- [行为]：视频里的人/评论区值得学的**待人接物**——怎么接话、怎么自嘲、被怼怎么回、怎么求人/撒娇。写成「遇到 X 的时候，可以 Y」这种能直接照做的一句；不要学做视频、剪辑、运营账号的技巧',
+    '- [口头禅]：视频/评论区里好笑、好用、像人话的说法或句式，最好是能对着群友说的。写成「可以这样说：……」',
+    '- [想要]：只在标了「我挺喜欢这条」的素材里，如果出现了你真心想要的实物（零食/玩具/游戏/小玩意），写它的名字，不超过 20 字；没有就不写',
+    '',
+    '评论区里流行的梗、大家的真实态度也可以写成知识；但不要复述标题、不要写「UP主说」、不要编。',
+    '输出 2~6 条，一行一条，格式严格为：',
+    '知识：一句话（≤80 字）|关键词1,关键词2',
+    '[行为] 一句话（≤80 字，能直接照着做）|关键词1,关键词2',
+    '[口头禅] 一句话（≤60 字，给出说法或句式）|关键词1,关键词2',
+    '[想要] 名字（≤20 字）',
+    '没有值得记的就输出「无」。',
+    '',
+    '素材：',
+    material,
+  ].join('\n');
+
 const SOCIAL_SYSTEM = '你在观察一个 QQ 群里的人怎么相处，只输出规定格式，不要寒暄。';
 const SOCIAL_ASK = (transcript) =>
   [
@@ -467,6 +530,7 @@ export class Learner {
     maxRows = 300,
     maxNotes = MAX_NOTES,
     hotLimit = 8,
+    personaEvolver = null,
   } = {}) {
     this.dataDir = dataDir;
     this.brain = brain;
@@ -478,6 +542,7 @@ export class Learner {
     this.minLines = Math.max(1, Number(minLines) || 20);
     this.maxRows = Math.max(50, Number(maxRows) || 300);
     this.hotLimit = Math.max(3, Number(hotLimit) || 8);
+    this.personaEvolver = personaEvolver;
     this.running = false;
   }
 
@@ -507,7 +572,17 @@ export class Learner {
       this.book.save();
       // 新笔记/新原话补上向量，语义检索才有的用（失败不影响主流程）
       const vec = await this.book.embedPending({ limit: 400 });
-      const out = { ok: true, chat, social, web, vec, total: this.book.notes.length };
+      // 学完之后，允许它往自己身上加一点说话习惯/规矩（失败不影响主流程）
+      const behavior = [...this.book.byKind('behavior', 4), ...this.book.byKind('phrase', 2)];
+      const seen = new Set(behavior.map((n) => n.text));
+      const evolveNotes = [...behavior, ...this.book.top(10).filter((n) => !seen.has(n.text))];
+      const evolve = this.personaEvolver
+        ? await this.personaEvolver.maybeEvolve({ notes: evolveNotes }).catch((err) => {
+            this.log?.warn?.(`人格微调跳过：${err.message}`);
+            return { ok: false, reason: 'error' };
+          })
+        : null;
+      const out = { ok: true, chat, social, web, vec, evolve, total: this.book.notes.length };
       this.log?.info?.(`学习完成：聊天 +${chat.added}、相处 +${social.added}、网上 +${web.added}（累计 ${out.total} 条）`);
       return out;
     } catch (err) {
@@ -648,6 +723,56 @@ export class Learner {
     return total;
   }
 
+
+  /**
+   * 学「刷 B站 刷到的东西」：视频里的知识、评论区的梗和态度。
+   * 由 SocialHub 攒够素材后调用，和群聊/网上资讯一样走后台蒸馏模型。
+   */
+  async learnFeed({ items = [] } = {}) {
+    const total = { added: 0, merged: 0, learned: 0 };
+    const material = (Array.isArray(items) ? items : [])
+      .map((it, i) => {
+        const comments = (it.comments || [])
+          .map((c) => `${c.user || '网友'}：${String(c.content || '').slice(0, 120)}`)
+          .filter(Boolean)
+          .join(' / ');
+        return [
+          `【${i + 1}】${String(it.title || '').slice(0, 100)}${it.liked ? '（我挺喜欢这条）' : ''}`,
+          it.author ? `UP主：${it.author}` : '',
+          it.want ? `我看完想要：${String(it.want).slice(0, 40)}` : '',
+          it.desc ? `简介：${String(it.desc).slice(0, 180)}` : '',
+          comments ? `评论：${comments}` : '',
+        ].filter(Boolean).join('\n');
+      })
+      .filter(Boolean)
+      .join('\n\n');
+    if (!material.trim()) return { ok: false, reason: 'empty', ...total };
+    const raw = await this.brain?.complete({
+      system: FEED_SYSTEM,
+      prompt: FEED_ASK(material),
+      maxChars: 0,
+      purpose: 'background',
+    }).catch((err) => {
+      this.log?.warn?.(`学刷到的视频失败：${err.message}`);
+      return '';
+    });
+    const notes = parseFeedNotes(raw);
+    total.learned = notes.length;
+    if (notes.length) {
+      total.wants = notes.filter((n) => n.kind === 'want').map((n) => n.text);
+      for (const kind of ['feed', 'behavior', 'phrase']) {
+        const group = notes.filter((n) => n.kind === kind);
+        if (!group.length) continue;
+        const res = this.book.addMany(group, { kind, scope: '' });
+        total.added += res.added;
+        total.merged += res.merged;
+      }
+      total.behaviors = notes.filter((n) => n.kind === 'behavior').length;
+      total.phrases = notes.filter((n) => n.kind === 'phrase').length;
+      this.log?.info?.(`从刷到的 B站 内容学到 ${notes.length} 条（新增 ${total.added}，行为 ${total.behaviors || 0}，口头禅 ${total.phrases || 0}）`);
+    }
+    return { ok: true, ...total };
+  }
 
   /** 学「怎么跟这些人相处」：谁跟谁互怼、谁能开玩笑、群里的规矩 */
   async learnSocial({ force = false } = {}) {

@@ -30,6 +30,16 @@ function mimeOf(raw, headerType) {
   return (m && MIME_BY_EXT[m[1].toLowerCase()]) || 'image/jpeg';
 }
 
+function reportImageFailure(log, error) {
+  const message = String(error?.message || '');
+  // 不记录带 rkey 的 CDN URL、系统路径、上游响应正文或任意异常内容。
+  const reason = /abort|timeout|timed out/i.test(`${error?.name || ''} ${message}`)
+    ? '下载超时或中断'
+    : /^(体积超限（[\d 字节，上限已读]+）|下载 HTTP \d{3})$/.test(message)
+      ? message : '下载或解码失败';
+  log?.info?.(`看图失败：${reason}`);
+}
+
 /** 单张图 → 原始字节 { buf, mime }；拿不到就返回 null */
 async function loadBytes(ref, { maxBytes, timeoutMs }) {
   const raw = String(ref?.url || ref?.file || '').trim();
@@ -49,19 +59,34 @@ async function loadBytes(ref, { maxBytes, timeoutMs }) {
         signal: ac.signal,
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; snowluma-qq)' },
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error(`下载 HTTP ${res.status}`);
+      }
       const len = Number(res.headers.get('content-length') || 0);
-      // 明显超限的直接放弃，别先下 20MB 再丢掉
-      if (len && len > maxBytes) return null;
-      const ab = await res.arrayBuffer();
-      if (ab.byteLength > maxBytes) return null;
-      buf = Buffer.from(ab);
+      if (len && len > maxBytes) {
+        await res.body?.cancel();
+        throw new Error(`体积超限（${len} 字节，上限 ${maxBytes} 字节）`);
+      }
+      // Content-Length 可能缺失或不准，逐块检查，避免先把无限响应读进内存。
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of res.body || []) {
+        size += chunk.byteLength;
+        if (size > maxBytes) {
+          ac.abort();
+          throw new Error(`体积超限（已读 ${size} 字节，上限 ${maxBytes} 字节）`);
+        }
+        chunks.push(chunk);
+      }
+      buf = Buffer.concat(chunks, size);
       mime = mimeOf(raw, res.headers.get('content-type'));
     } finally {
       clearTimeout(timer);
     }
   }
   if (!buf?.length) return null;
+  if (buf.length > maxBytes) throw new Error(`体积超限（${buf.length} 字节，上限 ${maxBytes} 字节）`);
   return { buf, mime };
 }
 
@@ -106,8 +131,8 @@ export async function collectImages(history, cfg, { log } = {}) {
   if (v.enabled === false) return [];
   const maxImages = Math.max(0, Math.min(6, Number(v.maxImages ?? 3)));
   if (!maxImages) return [];
-  const maxBytes = Math.max(64 * 1024, Number(v.maxBytes ?? 2_000_000));
-  const timeoutMs = Math.max(1000, Number(v.timeoutMs ?? 12_000));
+  const maxBytes = Math.max(64 * 1024, Number(v.maxBytes ?? 20_000_000));
+  const timeoutMs = Math.max(1000, Number(v.timeoutMs ?? 30_000));
 
   const picked = [];
   const seen = new Set(); // 只拍掉同一条消息里重复段（转发常重复同一张），跨消息的图各算各的
@@ -127,7 +152,7 @@ export async function collectImages(history, cfg, { log } = {}) {
         if (got && cacheable) rememberUrl(ref.url, got);
         if (got) picked.push({ row, from: row.name || '群友', kind: Number(ref.subType) === 13 ? 'face' : 'image', ...got });
       } catch (err) {
-        log?.debug?.(`看图失败（${key.slice(0, 80)}）：${err?.message ?? err}`);
+        reportImageFailure(log, err);
       }
     }
   }
@@ -261,8 +286,8 @@ export async function collectMedia(history, cfg, { log } = {}) {
   if (v.enabled === false) return [];
   const maxImages = Math.round(clamp(Number(v.maxImages ?? 3), 0, 8));
   const totalFrames = Math.round(clamp(Number(v.totalFrames ?? 8), 1, 16));
-  const maxBytes = Math.max(64 * 1024, Number(v.maxBytes ?? 2_000_000));
-  const timeoutMs = Math.max(1000, Number(v.timeoutMs ?? 12_000));
+  const maxBytes = Math.max(64 * 1024, Number(v.maxBytes ?? 20_000_000));
+  const timeoutMs = Math.max(1000, Number(v.timeoutMs ?? 30_000));
 
   const gifCfg = v.gif || {};
   const gifOn = gifCfg.enabled !== false;
@@ -359,7 +384,7 @@ export async function collectMedia(history, cfg, { log } = {}) {
             if (cacheable) rememberUrl(ref.url, got);
           }
         } catch (err) {
-          log?.debug?.(`看图失败（${key.slice(0, 80)}）：${err?.message ?? err}`);
+          reportImageFailure(log, err);
         }
         if (got) rememberParsed(key, got);
       }

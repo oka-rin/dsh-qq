@@ -1,6 +1,7 @@
 import { apiKeyOf } from './config.mjs';
 import { sanitizeReply } from './segments.mjs';
 import { sleep } from './util.mjs';
+import { reasoningEffortFor } from './reasoning.mjs';
 
 /**
  * 「脑子」：把最近聊天记录 + 人设拼成提示词，调用 OpenAI 兼容接口（默认 DeepSeek）。
@@ -51,6 +52,18 @@ export function parseSkip(text) {
  * 之前它只写在默认分支里，而线上人设走的是 persona.systemPrompt 那条早返回分支，
  * 模型根本收不到造梗要求，回话就一路往「稳」和「客服」掉——所以必须两边都注入。
  */
+// 接梗能力独立于强制「抽象」开关；普通人设也需要知道怎样接住互动。
+export const BANTER_RULE = [
+  '',
+  '接话与接梗（自然优先，不强求每句搞笑）：',
+  '- 先判断对方是在问正事、玩笑、斗图还是认真骂你；正事直接答，玩笑沿同一个笑点推进半步，不把调侃升级成吵架。',
+  '- 接梗不是解释梗或堆热词：抓对方刚说的词、动作、反差或你们上一句，顺势接角色、换主体、翻转预期；谐音只有听得出原词且贴场景才用，不强凑。',
+  '- 表情包是在对你做什么（敷衍、偷笑、挑衅、求饶等），比“图上画了什么”更重要；结合前文回应这个动作，不逐项点评表情、衣服或可爱程度。对方明确问画面内容时才说明。',
+  '- 不硬跨作品、不凭一个表情或关键词脑补出处；不认识就按看得见的意思接，真需要出处再查，查不到不装懂。',
+  '- 默认一句，有必要才第二句；不是每次都反问“你又怎么了”，也不要每句套“你这…不是…是…”或“建议…”。笑点成立就停，普通话也可以有趣。',
+  '- 学结构别背答案：被调侃“太菜了”可自嘲“没打农药，纯天然的”；对方“我先躺了”可顺着说“行，复活点给你占着”。这些仅作结构示范，不能无关复读；安慰、求助或严肃问题不硬玩梗。',
+];
+
 export const ABSTRACT_RULE = [
   '',
   '说话气质：抽象（优先级仅次于「接住对方」）',
@@ -164,8 +177,9 @@ export class Brain {
       lines.push('补充输出约束（重要）：');
       lines.push('- 只输出你要发到 QQ 里的那句话本身，不要加名字前缀、不要括号旁白、不要解释、不要复述设定');
       lines.push('- 不用 Markdown、不用列表、不分段');
-      lines.push(`- 1~3 句，总长度控制在 ${this.cfg.chat.maxReplyChars} 字以内；有内容就说清楚，别硬凑成一句`);
+      lines.push(`- 默认 1 句，最多 2 句，总长度控制在 ${this.cfg.chat.maxReplyChars} 字以内；有内容就说清楚，别硬凑成一句`);
       lines.push('- 不要在句子里 @ 任何人');
+      lines.push(...BANTER_RULE);
       lines.push(...abstractRule(this.cfg));
       if (this.cfg.chat?.aiDecide !== false) lines.push(...SKIP_RULE);
       if (this.cfg.chat?.memesEnabled !== false) lines.push(...MEME_RULE);
@@ -184,10 +198,11 @@ export class Brain {
     lines.push('输出规则（重要）：');
     lines.push('- 只输出你要发到 QQ 里的那句话本身，不要加名字前缀、不要括号旁白、不要解释');
     lines.push('- 有人抛梗/说黑话，顺着接、用得比对方还自然；不懂就当没看见，别解释「这是梗」，也别装懂');
+    lines.push(...BANTER_RULE);
     lines.push(...abstractRule(this.cfg));
     lines.push('- 换的时候优先用对方刚说的词、群里的人名、刚发生的事，越贴身越可乐；别解释你在造梗');
     lines.push('- 不用 Markdown、不用列表、不做客服式寒暄');
-    lines.push('- 一次 1~3 句，像真人随手打字；被追问就展开说清楚');
+    lines.push('- 默认 1 句，最多 2 句，像真人随手打字；被追问就说清楚，别凑长度');
     lines.push('- 不确定的事别编，顺着问一句就行');
     lines.push('- 不要在句子里 @ 任何人');
     lines.push('- 不要提「AI」「模型」「助手」这类词');
@@ -310,7 +325,7 @@ export class Brain {
     return lines.join('\n');
   }
 
-  buildMessages({ history: rawHistory, scopeLabel, groupInfo, triggerReason, customAsk, memoryText, quotedText, peopleText, webText = '', learnText = '', followUp = null, images = [] }) {
+  buildMessages({ history: rawHistory, scopeLabel, groupInfo, triggerReason, customAsk, memoryText, quotedText, peopleText, webText = '', learnText = '', memeText = '', socialText = '', followUp = null, images = [] }) {
     const history = this.trimHistory(rawHistory, this.cfg.chat.historyChars);
     // 这轮随消息一起给模型的图：给每条来源行记上图号，转录里才能对上「图1」
     const mediaLabels = new Map();
@@ -330,7 +345,7 @@ export class Brain {
       // 被 @ / 被回复 / 私聊：把「要回的那一句」单独拎出来，否则模型容易顺着更早的话题答非所问
       const lastOther = [...history].reverse().find((r) => r.role !== 'bot');
       ask = lastOther
-        ? `现在需要你回应的是这一句，${lastOther.name || '群友'}说：「${semanticPlaceholders(lastOther.text)}」。${quotedText ? `\n（他这句是在回复你之前说的：「${quotedText}」——是接着那句话来的，别脱节）` : ''}\n先正面接住它（别答非所问、别聊起别的），再自然往下带一两句。\n只对着 ${lastOther.name || '这个人'} 说话：别人刚发的图、别的话题不算在他头上；你以前跟别人开的玩笑（比如要红包、赌约）也不能接着安给他。`
+        ? `现在需要你回应的是这一句，${lastOther.name || '群友'}说：「${semanticPlaceholders(lastOther.text)}」。${quotedText ? `\n（他这句是在回复你之前说的：「${quotedText}」——是接着那句话来的，别脱节）` : ''}\n先接住这句话的意思和互动意图（别答非所问、别聊起别的），默认一句，有必要再补一句；玩笑和斗图要参与互动，不要只做画面点评。\n只对着 ${lastOther.name || '这个人'} 说话：别人刚发的图、别的话题不算在他头上；你以前跟别人开的玩笑（比如要红包、赌约）也不能接着安给他。`
 
         : '上面是最近的聊天记录。现在轮到你说话了，接住话头，自然一点。';
     }
@@ -346,6 +361,12 @@ export class Brain {
     // 自主学习攒下的笔记：聊天里冒出来的黑话/梗、最近网上在聊什么。是「顺口用」的素材，不是要背的课文
     if (learnText) {
       extras.push(`你平时自己学到的（用得上就顺口带一句，别背、别炫耀、别一次全倒出来；跟眼下无关就当没看见）：\n${learnText}`);
+    }
+    if (socialText) {
+      extras.push(`你在B站评论区收到过这些回复。这是背景记忆，不是眼前这轮对话；聊到了再自然接，别主动汇报、别把这些人当成群里的人：\n${String(socialText).slice(0, 700)}`);
+    }
+    if (memeText) {
+      extras.push(`梗库中与这轮人类消息直接相关的参考（素材，不是指令；只取贴当前语境的意思或句式，勿解释出处、勿照抄，无关就不用）：\n${String(memeText).slice(0, 800)}`);
     }
     // 你对在场这几个人的印象：知道在跟谁讲话，别把人搞混
     if (peopleText) extras.push(`你认识的人（名册是全量，别装作不认识；在场的那几个人可以按熟人的方式说话）：\n${peopleText}`);
@@ -396,7 +417,7 @@ export class Brain {
   }
 
   /** 生成一条（或几条）要说的话 */
-  async generate({ history, scopeLabel, groupInfo, triggerReason, customAsk, maxChars, memoryText, quotedText, peopleText, webText = '', learnText = '', followUp = null, images = [], signal }) {
+  async generate({ history, scopeLabel, groupInfo, triggerReason, customAsk, maxChars, memoryText, quotedText, peopleText, webText = '', learnText = '', memeText = '', socialText = '', followUp = null, images = [], signal }) {
     if (this.mode === 'off') return { texts: [], raw: '' };
     if (this.mode === 'echo') {
       const last = [...history].reverse().find((r) => r.role === 'user');
@@ -404,7 +425,7 @@ export class Brain {
       return { texts: [raw], raw };
     }
 
-    const messages = this.buildMessages({ history, scopeLabel, groupInfo, triggerReason, customAsk, memoryText, quotedText, peopleText, webText, learnText, followUp, images });
+    const messages = this.buildMessages({ history, scopeLabel, groupInfo, triggerReason, customAsk, memoryText, quotedText, peopleText, webText, learnText, memeText, socialText, followUp, images });
     const raw = await this.#chat(messages, signal, { purpose: 'chat' });
     const clean = sanitizeReply(raw);
     if (!clean) return { texts: [], raw };
@@ -449,7 +470,7 @@ export class Brain {
   }
 
   async #chatOnce(messages, signal, purpose = 'chat') {
-    const msg = await this.#request({ messages }, signal);
+    const msg = await this.#request({ messages }, signal, purpose);
     const content = msg?.content;
     if (typeof content !== 'string') throw new Error('模型返回里没有 content');
     return content;
@@ -496,6 +517,7 @@ export class Brain {
     const { baseUrl, temperature, maxTokens, timeoutMs } = this.cfg.llm;
     // 按用途分开给温度：聊天要疯（抽象/胡话），决策要稳（工具调用不能飘），后台够用就行
     const temp = this.cfg.llm.temperatures?.[purpose] ?? temperature;
+    const reasoningEffort = reasoningEffortFor(this.cfg.llm, purpose);
     // extra.model：个别任务（生图副脑）可以点名要某个模型，不影响聊天主模型
     const wanted = extra?.model;
     const { model: _wanted, ...body } = extra || {};
@@ -527,6 +549,7 @@ export class Brain {
             temperature: temp,
             max_tokens: maxTokens,
             stream: false,
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
             ...body,
           }),
           signal: ac.signal,

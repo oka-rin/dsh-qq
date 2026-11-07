@@ -26,8 +26,8 @@ test('schema helpers read and write nested paths without touching the source obj
 test('every field path is unique and present in the public example config', () => {
   const paths = CONFIG_SCHEMA.flatMap((g) => g.fields.map((f) => f.path));
   assert.equal(FIELD_BY_PATH.size, paths.length, '同一个 path 不能登记两次');
-  assert.equal(CONFIG_SCHEMA.length, 12);
-  assert.equal(paths.length, 201);
+  assert.equal(CONFIG_SCHEMA.length, 13);
+  assert.equal(paths.length, 219);
   const live = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
   const missing = paths.filter((p) => getByPath(live, p) === undefined);
   assert.deepEqual(missing, [], '公开示例应包含全部可编辑字段，测试不得依赖私人 config.json');
@@ -81,8 +81,8 @@ test('GET /api/config exposes the whole schema, with secrets masked', async (t) 
   const f = await fixture(t);
   const body = await (await f.request('/api/config')).json();
   assert.equal(body.ok, true);
-  assert.equal(body.schema.length, 12);
-  assert.equal(body.schema.flatMap((g) => g.fields).length, 201);
+  assert.equal(body.schema.length, 13);
+  assert.equal(body.schema.flatMap((g) => g.fields).length, 219);
 
   const secret = body.schema.flatMap((g) => g.fields).find((fl) => fl.path === 'llm.apiKey');
   assert.equal(secret.value, '', '密钥不能回显');
@@ -125,6 +125,34 @@ test('POST /api/config writes nested updates and rejects bad input', async (t) =
   const csv = await f.post({ 'chat.quietHours': '23:00-08:00\n12:00-13:00' });
   assert.equal(csv.status, 200);
   assert.deepEqual(JSON.parse(fs.readFileSync(f.configPath, 'utf8')).chat.quietHours, ['23:00-08:00', '12:00-13:00']);
+});
+
+test('reasoning selections round-trip through both save routes and reject invalid values atomically', async (t) => {
+  const f = await fixture(t);
+  const read = async () => (await (await f.request('/api/config')).json());
+  const first = await read();
+  assert.ok(first.schema.flatMap(g => g.fields).find(x => x.path === 'llm.reasoningEffort').options.some(x => x.value === 'xhigh'));
+  const response = await f.post({ 'llm.reasoningEffort': 'medium', 'llm.reasoningEfforts.chat': 'low', 'llm.reasoningEfforts.background': 'none' });
+  assert.equal(response.status, 200);
+  const saved = await read();
+  assert.equal(saved.editable.llm.reasoningEffort, 'medium');
+  assert.equal(saved.editable.llm.reasoningEfforts.chat, 'low');
+  const patch = await f.request('/api/config', { method: 'POST', body: JSON.stringify({ patch: { llm: { reasoningEfforts: { agent: 'high' } } } }) });
+  assert.equal(patch.status, 200);
+  assert.deepEqual((await read()).editable.llm.reasoningEfforts, { chat: 'low', background: 'none', agent: 'high' });
+  const before = fs.readFileSync(f.configPath, 'utf8');
+  for (const body of [
+    { updates: { 'llm.reasoningEffort': 'oops', 'chat.draw.maxPerDay': 1 } },
+    { updates: { 'llm.reasoningEfforts.chat': 'maximum' } },
+    { patch: { llm: { reasoningEffort: null } } },
+    { patch: { llm: { reasoningEfforts: { chat: 'oops' } } } },
+    { patch: { llm: { reasoningEfforts: [] } } },
+  ]) {
+    assert.equal((await f.request('/api/config', { method: 'POST', body: JSON.stringify(body) })).status, 400);
+    assert.equal(fs.readFileSync(f.configPath, 'utf8'), before);
+  }
+  assert.equal((await f.post({ 'llm.reasoningEffort': '', 'llm.reasoningEfforts.chat': '' })).status, 200);
+  assert.equal((await read()).editable.llm.reasoningEffort, '');
 });
 
 test('daily news updates share strict validation and fail without partial writes', async (t) => {

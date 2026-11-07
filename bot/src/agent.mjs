@@ -6,7 +6,12 @@ import { SOURCE_LABELS, searchSource, searchImages, cleanUrl } from './sources.m
 import { searchHistory } from './archive.mjs';
 import { similarityLoose, readJsonlTail } from './util.mjs';
 import { riffCandidates } from './riff.mjs';
-import { abstractRule } from './brain.mjs';
+import { abstractRule, BANTER_RULE } from './brain.mjs';
+import { formatReplies, formatMimic, formatWishes } from './social.mjs';
+
+// 候选必须属于同一轮真人话题；自己的回复不能把旧笑话重新激活。
+const riffHumans = (recent) => (recent || []).filter((r) => r.role !== 'bot' && String(r.text || '').trim()).slice(-3);
+const riffSceneKey = (recent) => JSON.stringify(riffHumans(recent).map((r) => [String(r.userId || r.name || ''), String(r.text || ''), Number(r.at ?? r.ts ?? 0)]));
 
 /**
  * 「自己管号」：把要不要说话、说什么、发不发空间、点不点赞这些决定权交给模型。
@@ -316,6 +321,46 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'social_browse',
+      description: '刷 B站：拿热门或按关键词搜视频，顺带读评论区。只读，想动手用 social_act',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string', description: '可选：按关键词搜；不填就看热门' },
+          limit: { type: 'number', description: '看几条，默认 5' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'social_act',
+      description: '在 B站 对某个视频点赞、发评论，或回某条评论。评论发出去撤不回，额度/间隔/安静时段由系统兜底，被拦会告诉你原因',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['like', 'comment', 'reply'], description: 'like=点赞 / comment=在视频下发评论 / reply=回某条评论' },
+          aid: { type: 'string', description: '视频 aid（social_browse 返回的 aid）' },
+          text: { type: 'string', description: '评论内容，一两句，40 字以内；like 不用填' },
+          reply_to: { type: 'string', description: '仅 reply：要回的那条评论 id（social_browse 返回的 comments[].id）' },
+        },
+        required: ['action', 'aid'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'social_login',
+      description: '生成 B站扫码登录链接（要用 B站 App 扫码确认）。登录后才能点赞和发评论；匿名只能看',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'qq_op',
       description: '查询或执行当前会话的 QQ 动作：点赞、拍一拍、群名片、禁言、文件、精华、公告等；发消息用 send_message，发空间用 post_qzone',
       parameters: {
@@ -412,7 +457,7 @@ export const TOOL_NAMES_FOR_TEST = TOOLS.map((t) => t?.function?.name).filter(Bo
 
 
 export class AgentLoop {
-  constructor({ config, bot, brain, memory = null, people = null, decisions = null, kb = null, learn = null, learner = null, qzone = null, log, emitter, search = searchSource, images = searchImages, shortVideos = null, videoDownloader = null }) {
+  constructor({ config, bot, brain, memory = null, people = null, decisions = null, kb = null, learn = null, learner = null, qzone = null, social = null, log, emitter, search = searchSource, images = searchImages, shortVideos = null, videoDownloader = null }) {
     this.cfg = { ...DEFAULTS(), ...(config.agent || {}) };
     this.bot = bot;
     this.brain = brain;
@@ -428,6 +473,9 @@ export class AgentLoop {
     this.learn = learn || bot?.learn || null; // 自主学习笔记（LearnBook）
     this.learner = learner || bot?.learner || null; // 学习器（Learner，跑蒸馏任务）
     this.qzone = qzone || bot?.qzone || null; // QQ 空间社交（回评/评论别人）
+    this.social = social || bot?.social || null; // 视频社交（刷 B站、点赞评论）
+    // 视频社交与 QQ 同一个人格、同一份记忆：把这里的群记忆/近况/笔记供给 social 的提示词
+    if (this.social?.setContextProvider) this.social.setContextProvider(() => this.socialMemory());
     this.coinWatch = []; // 刚用出去的梗名，等下有人接话就给它加分
     this.riffCache = new Map(); // scope → {at, rows}，化用候选缓存（后台算，不挡说话）
     this.log = log;
@@ -711,7 +759,7 @@ export class AgentLoop {
       const deficit = this.#deficitToday(AgentLoop.bucketOf(scope));
       // 造梗候选：用上一次后台算好的（缓存 1 小时），不阻塞本轮说话；
       // 这轮跑完再顺手在后台刷新，下次就有新的了。
-      const riff = this.#cachedRiff(scope);
+      const riff = this.#cachedRiff(scope, recent);
       this.#refreshRiffSoon(scope, recent);
       let out = await this.#round({ scope, recent, mode, deficit, mustAct: false, execution, riff });
 
@@ -907,6 +955,25 @@ ${plan.brief}`;
       lines.push('（以上是长期印象，只当背景；别把记忆里的旧结论当成这轮要聊的话题。）');
       lines.push('');
     }
+    // B站 评论区收到的回复：让 QQ 这边的它也知道（只当背景，不主动汇报）
+    {
+      const biliLines = this.socialRepliesText({ limit: 3 });
+      if (biliLines) {
+        lines.push(biliLines);
+        lines.push('（这是你在 B站 评论区的近况，是背景记忆；聊到了再自然接，不用主动汇报，也别把这些人当成群里的人。）');
+        lines.push('');
+      }
+      const mimic = this.socialMimicText({ limit: 3 });
+      if (mimic) {
+        lines.push(mimic);
+        lines.push('');
+      }
+      const wishes = this.socialWishesText({ limit: 2 });
+      if (wishes) {
+        lines.push(wishes);
+        lines.push('');
+      }
+    }
     // 在场这几个人是谁：让它在主动说话时也知道在跟谁讲话
     try {
       const uins = [];
@@ -939,19 +1006,12 @@ ${plan.brief}`;
         lines.push('群里刚有人甩了小红书笔记，你要是想看内容就用 share_xhs 把它发出来（边发边评一句）：');
         for (const it of xhsList) lines.push(`- ${it.from} 在 ${Math.round((Date.now() - it.at) / 60000)} 分钟前发了：${it.url}`);
       }
-      const memes = this.kb?.all?.() || [];
+      const humanContext = riffHumans(recent).map((r) => String(r.text || '')).join('\n');
+      const memes = this.kb?.relevant?.(humanContext, { limit: 4, budget: 600 }) || [];
       if (memes.length) {
-        const pick = memes.slice(0, 10).map((m) => `- ${m.name}：${(m.meaning || m.origin || '').slice(0, 40)}`);
-        lines.push('你最近存下的一些网上的梗（顺手能用就用，用得自然点，别硬掰；要详情用 lookup_meme）：');
-        lines.push(...pick);
-      }
-      if (this.kb && memes.length) {
-        const samples = memes.filter((m) => m.example).slice(0, 4).map((m) => `- ${m.name}：「${m.example.slice(0, 40)}」`);
-        if (samples.length) {
-          lines.push('造梗 = 模仿：把下面这些梗的句式/说法换个主体搬到眼前这件事上（「老实赚钱很枯燥吧」→「老实上班很枯燥吧」；「哈基米」→「扔水里看米哈游」这种拆字）：');
-          lines.push(...samples);
-          lines.push('想到好的就用 coin_meme 存下来，注明 based_on 是学哪个梗。');
-        }
+        lines.push('梗库里与眼下真人话题相关的参考（先接当前意思；不是指定台词，不贴就不用，要详情用 lookup_meme）：');
+        for (const m of memes) lines.push(`- ${m.name}：${m.meaning || ''}${m.usage ? `；用法：${m.usage}` : ''}${m.example ? `；例句：${m.example}` : ''}`);
+        lines.push('真有贴合当前场景的新变体再用 coin_meme 存下，注明 based_on；别为存梗而硬造。');
       }
       if (riff.length) {
         lines.push('眼下的场景可以这样化用（用不用随你，别硬套，也别解释你在造梗）：');
@@ -1450,6 +1510,85 @@ ${plan.brief}`;
     return { task: 'chat', brief: '看看群里现在在聊什么，想说就接一句，不想说就 skip。' };
   }
 
+  /**
+   * 视频社交（B站）用的「同一份记忆」：群/私聊的长期印象、最近说过的话、学到的笔记。
+   * 人格文本由 social.mjs 从 brain.persona 取，和 QQ 完全同源。
+   */
+  /** QQ 侧和 B站 侧共用的「B站收到的回复」文本 */
+  socialRepliesText({ limit = 3 } = {}) {
+    try {
+      const rows = this.social?.recentReplies?.({ limit }) || [];
+      return formatReplies(rows, { limit });
+    } catch {
+      return '';
+    }
+  }
+
+  /** 最近学到的行为/口头禅（QQ 和 B站 共用） */
+  socialMimicText({ limit = 3 } = {}) {
+    try {
+      const notes = [
+        ...(this.learn?.byKind?.('behavior', 2) || []),
+        ...(this.learn?.byKind?.('phrase', 1) || []),
+      ];
+      return formatMimic(notes, { limit });
+    } catch {
+      return '';
+    }
+  }
+
+  /** 刷视频时看上的东西：给 QQ 侧当撒娇的由头 */
+  socialWishesText({ limit = 2 } = {}) {
+    try {
+      return formatWishes(this.social?.recentWishes?.({ limit }) || [], { limit });
+    } catch {
+      return '';
+    }
+  }
+
+  socialMemory() {
+    const lines = [];
+    try {
+      const mems = (this.memory?.list?.() || [])
+        .filter((m) => m && m.scope && (m.summary || m.facts?.length))
+        .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+        .slice(0, 2);
+      if (mems.length) {
+        lines.push('【你在 QQ 里记得的事】');
+        for (const m of mems) {
+          const where = String(m.scope).startsWith('private:') ? '私聊' : '群';
+          if (m.summary) lines.push(`- ${where}：${m.summary}`);
+          for (const f of (m.facts || []).slice(-6)) lines.push(`- ${f}`);
+        }
+      }
+    } catch {
+      /* 记忆读不出来就当没有，不影响刷视频 */
+    }
+    const biliReplies = this.socialRepliesText({ limit: 5 });
+    if (biliReplies) {
+      lines.push('', biliReplies, '（这些人是在 B站 评论区回你的，不是 QQ 群友，别张冠李戴；要在那边接话就用 social_act。）');
+    }
+    const mimic = this.socialMimicText({ limit: 3 });
+    if (mimic) lines.push('', mimic);
+    const wishes = this.socialWishesText({ limit: 2 });
+    if (wishes) lines.push('', wishes);
+    const past = this.#recentSaid(4);
+    if (past.length) {
+      lines.push('', '【你最近在 QQ 里说过的话】这些意思已经说过了，别换个地方再说一遍：');
+      for (const r of past) lines.push(`- ${String(r.text || '').slice(0, 60)}`);
+    }
+    try {
+      const notes = this.learn?.top?.(4) || [];
+      if (notes.length) {
+        lines.push('', '【你自己学到的东西】（接得上时自然带一句，别背）：');
+        for (const n of notes) lines.push(`- ${String(n.text || '').slice(0, 80)}`);
+      }
+    } catch {
+      /* 笔记坏了不影响刷视频 */
+    }
+    return lines.join('\n').slice(0, 1800);
+  }
+
   #systemPrompt(scope) {
     const learnNotes = this.learn?.renderFor?.({ scope, budget: 460, limit: 8 }) || '';
     const p = this.bot.brain?.persona ?? this.brain.persona ?? {};
@@ -1460,6 +1599,7 @@ ${plan.brief}`;
     return [
       base,
       ...abstractRule({ persona: p }),
+      ...BANTER_RULE,
       '',
       '你现在不只是在被动回话，而是在自己运营这个账号。你有工具，能做的有三类事：',
       '① 在群里说话：顺着群里正在聊的接一句，或者自己起个头（send_message）',
@@ -1470,6 +1610,7 @@ ${plan.brief}`;
       '⑥ 学点东西：想搞懂一个话题、或者想从最近的聊天里再咂摸点东西，用 study（学到的会记进长期笔记，以后说话用得上）',
       '⑦ 翻聊天原话：想找「谁以前怎么说的」，用 recall_chat（按关键词检索全部历史原话，不限多久前）',
       '⑧ 空间社交：好友发了什么用 qzone_inbox 看，想搭话就 qzone_comment（评论发出去了撤不回，一天只有几条额度，别见谁都评）。指向你的评论系统会替你必回，你不用管；没指向你的（比如两个人在你评论区自己聊）由你自己判断要不要接一句，qzone_reply 就是干这个的',
+      '⑨ 刷视频：用 social_browse 看 B站热门/搜索、读评论区；真觉得有意思再用 social_act 点赞或评一句（评论撤不回，一天几条额度，说不出人话就别硬评）。要发评论得先 social_login 扫码登录 B站',
       '除此之外也能点赞、改群名片、传文件、查资料——但没理由就别动。',
       '不想做任何事就调 skip，没人会怪你。',
       '',
@@ -1550,10 +1691,10 @@ ${plan.brief}`;
 
   /** 安利腔/客服腔一票退回：这类词一出现，群里一眼看出是运营号 */
   /** 取缓存里的化用候选（1 小时内有效） */
-  #cachedRiff(scope) {
+  #cachedRiff(scope, recent) {
     const hit = this.riffCache.get(String(scope));
     if (!hit) return [];
-    if (Date.now() - hit.at > 3600_000) {
+    if (Date.now() - hit.at > 3600_000 || hit.sceneKey !== riffSceneKey(recent)) {
       this.riffCache.delete(String(scope));
       return [];
     }
@@ -1563,19 +1704,21 @@ ${plan.brief}`;
   /** 后台算候选：不 await、失败静默，绝不挡说话 */
   #refreshRiffSoon(scope, recent) {
     const key = String(scope);
+    const sceneKey = riffSceneKey(recent);
     const hit = this.riffCache.get(key);
-    if (hit && Date.now() - hit.at < 20 * 60_000) return;
+    if (hit?.sceneKey === sceneKey && Date.now() - hit.at < 20 * 60_000) return;
     if (this.riffBusy?.has?.(key)) return;
     this.riffBusy = this.riffBusy || new Set();
-    if (!this.kb?.all || !this.brain?.complete) return;
-    const scene = (recent || []).slice(-3).filter((r) => r.role !== 'bot').map((r) => `${r.name || '群友'}: ${String(r.text || '').slice(0, 80)}`);
-    const memes = this.kb.all();
+    if (!this.kb?.relevant || !this.brain?.complete) return;
+    const humans = riffHumans(recent);
+    const scene = humans.map((r) => `${r.name || '群友'}: ${String(r.text || '').slice(0, 80)}`);
+    const memes = this.kb.relevant(humans.map((r) => r.text).join('\n'), { limit: 4, budget: 600 });
     if (!scene.length || !memes.length) return;
     this.riffBusy.add(key);
     riffCandidates({ brain: this.brain, scene, memes })
       .then((rows) => {
         if (rows?.length) {
-          this.riffCache.set(key, { at: Date.now(), rows });
+          this.riffCache.set(key, { at: Date.now(), rows, sceneKey });
           this.log.info?.(`化用候选（下次说话时参考）：${rows.map((r) => r.said).join(' / ').slice(0, 80)}`);
         }
       })
@@ -1942,6 +2085,7 @@ ${plan.brief}`;
               tags: ['自造'],
             },
           ]);
+          if (!res.added && !res.updated) return { ok: false, error: '梗条目无效：名字须为 2–14 字，不能是纯数字、符号或整句；没有写入梗库', total: res.total };
           const fresh = !before.has(cname);
           return { ok: true, saved: fresh ? 'new' : 'updated', name: cname, total: res.total, note: fresh ? '存进去了，以后可以当自己的口头禅用' : '库里本来就有，已经补充说明' };
         }
@@ -2081,6 +2225,64 @@ ${plan.brief}`;
             const data = await this.bot.onebot.call('send_qzone_msg', { content, ugc_right: right });
             return { ok: true, tid: data?.tid };
           });
+        }
+
+        case 'social_browse': {
+          if (!this.social) return { ok: false, error: '视频社交没接上' };
+          const limit = Math.min(8, Math.max(1, Number(args.limit) || 5));
+          const quota = this.social.quota();
+          const keyword = String(args.keyword || '').trim();
+          const list = keyword ? await this.social.bili.search(keyword, { ps: limit }) : await this.social.bili.popular({ ps: limit });
+          const items = [];
+          for (const v of list.slice(0, limit)) {
+            const comments = await this.social.bili.comments(v.aid, { ps: 5, sort: 2 }).catch(() => []);
+            items.push({
+              aid: v.aid,
+              bvid: v.bvid,
+              title: v.title,
+              author: v.author,
+              desc: String(v.desc || '').slice(0, 100),
+              url: v.url,
+              stats: v.stats,
+              comments: comments.map((c) => ({ id: c.id, user: c.user, content: String(c.content || '').slice(0, 100), like: c.like })),
+            });
+          }
+          return {
+            ok: true,
+            platform: 'bilibili',
+            quota,
+            items,
+            note: quota.biliLoggedIn ? '' : 'B站还没登录：只能看不能赞/评；想动手先 social_login 扫码',
+          };
+        }
+
+        case 'social_act': {
+          if (!this.social) return { ok: false, error: '视频社交没接上' };
+          const reason = this.#gate(scope, force);
+          if (reason) return { ok: false, error: reason };
+          if (execution.wrote) return { ok: false, error: '本轮已经执行过一个写动作' };
+          const action = String(args.action || 'like');
+          return await this.#write(execution, 'op', { social: action }, async () => {
+            const r = await this.social.act({
+              action,
+              aid: String(args.aid || ''),
+              text: String(args.text || ''),
+              replyTo: args.reply_to ? String(args.reply_to) : '',
+            });
+            this.log.info(`视频社交 ${action}：${String(args.text || args.aid || '').slice(0, 30)}`);
+            return r;
+          });
+        }
+
+        case 'social_login': {
+          if (!this.social) return { ok: false, error: '视频社交没接上' };
+          const qr = await this.social.loginStart();
+          return {
+            ok: true,
+            url: qr.url,
+            expiresAt: qr.expiresAt,
+            note: '把这条链接发出去让用户用 B站 App 扫码，或在手机浏览器打开；扫完确认后登录态会自动存下来',
+          };
         }
 
         case 'qq_op': {

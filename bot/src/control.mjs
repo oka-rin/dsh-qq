@@ -5,6 +5,7 @@ import { createLogger, scopeKey } from './util.mjs';
 import { DAILY_NEWS_DEFAULTS } from './daily-news.mjs';
 import { NEWS_SOURCES } from './daily-catalog.mjs';
 import { CONFIG_SCHEMA, FIELD_BY_PATH, getByPath, setByPath } from './schema.mjs';
+import { validateReasoningConfig } from './reasoning.mjs';
 
 const DAILY_NEWS_FIELDS = [...Object.keys(DAILY_NEWS_DEFAULTS), 'notBeforeDate'];
 const NEWS_SOURCE_IDS = new Set(NEWS_SOURCES);
@@ -212,7 +213,7 @@ const DASHBOARD = /* html */ `<!doctype html>
  * 默认只监听 127.0.0.1；如果配了 token，则所有 /api 请求都要带 token。
  */
 export class ControlServer {
-  constructor({ config, configPath = null, bot, share = null, interject = null, agent = null, people = null, decisions = null, dailyNews = null, kb = null, kbScan = null, learn = null, learner = null, qzone = null, log = createLogger('control'), emitter }) {
+  constructor({ config, configPath = null, bot, share = null, interject = null, agent = null, people = null, decisions = null, dailyNews = null, kb = null, kbScan = null, learn = null, learner = null, qzone = null, social = null, personaEvolve = null, log = createLogger('control'), emitter }) {
     this.cfg = config;
     this.configPath = configPath;
     this.bot = bot;
@@ -226,6 +227,8 @@ export class ControlServer {
     this.learn = learn; // 自主学习笔记（LearnBook）
     this.learner = learner; // 学习器（Learner）
     this.qzone = qzone; // QQ 空间社交（QzoneSocial）
+    this.social = social; // 视频社交（SocialHub）
+    this.personaEvolve = personaEvolve; // 人格自微调（PersonaEvolver）
     this.decisions = decisions; // 决策账本：为什么没说话
     this.log = log;
     this.emitter = emitter;
@@ -248,7 +251,14 @@ export class ControlServer {
     return `【现在实际】蒸馏 → ${distill}；检索 → ${recall}。`;
   }
 
+  // Persisted live persona has the same precedence as Brain/Bot at startup.
+  // Both settings views and both save routes must use this baseline.
+  #effectiveConfig() {
+    return { ...this.cfg, persona: this.bot.store?.persona?.() || this.cfg.persona };
+  }
+
   #schemaView() {
+    const effective = this.#effectiveConfig();
     const secretSet = (path) => {
       if (getByPath(this.cfg, path)) return true;
       const envName = getByPath(this.cfg, path.replace(/\.apiKey$/, '.keyEnv'));
@@ -259,7 +269,7 @@ export class ControlServer {
       title: group.title,
       note: group.id === 'distill' ? `${this.#distillNote()} ${group.note || ''}` : group.note || '',
       fields: group.fields.map((f) => {
-        const raw = getByPath(this.cfg, f.path);
+        const raw = getByPath(effective, f.path);
         if (f.type === 'secret') {
           return { ...f, value: '', secret: true, set: secretSet(f.path) };
         }
@@ -270,7 +280,7 @@ export class ControlServer {
 
   /** 面板可改的那些项（白名单，别的字段一律不许从网页改） */
   #editableConfig() {
-    const c = this.cfg;
+    const c = this.#effectiveConfig();
     return {
       agent: {
         enabled: c.agent?.enabled,
@@ -317,6 +327,8 @@ export class ControlServer {
       llm: {
         model: c.llm?.model,
         models: c.llm?.models,
+        reasoningEffort: c.llm?.reasoningEffort ?? '',
+        reasoningEfforts: c.llm?.reasoningEfforts ?? { chat: '', agent: '', background: '' },
         maxTokens: c.llm?.maxTokens,
         temperature: c.llm?.temperature,
       },
@@ -347,7 +359,7 @@ export class ControlServer {
     const 脏的 = entries.filter(([p]) => !FIELD_BY_PATH.has(p)).map(([p]) => p);
     if (脏的.length) throw new Error(`不认识的配置项：${脏的.slice(0, 5).join('、')}`);
 
-    let next = { ...this.cfg };
+    let next = this.#effectiveConfig();
     let changed = 0;
     for (const [path, raw] of entries) {
       const field = FIELD_BY_PATH.get(path);
@@ -359,10 +371,8 @@ export class ControlServer {
     if (!changed) throw new Error('没有实际改动');
     // 新旧两块面板共享每日资讯校验，不能从 updates 绕过时间/来源检查。
     if (entries.some(([p]) => p.startsWith('dailyNews.'))) dailyNewsPatch(next.dailyNews);
-    if (!this.configPath) throw new Error('不知道配置文件路径，不能保存');
-    const 落盘 = Object.fromEntries(Object.entries(next).filter(([k]) => !k.startsWith('__')));
-    fs.writeFileSync(this.configPath, JSON.stringify(落盘, null, 2) + '\n', 'utf8');
-    this.cfg = next;
+    if (entries.some(([p]) => p.startsWith('llm.'))) validateReasoningConfig(next.llm);
+    this.#persistConfig(next, entries.some(([p]) => p.startsWith('persona.')));
     return { saved: entries.map(([p]) => p), changed, configPath: this.configPath, restarting: true };
   }
 
@@ -394,6 +404,12 @@ export class ControlServer {
         }
         return raw ?? null;
       }
+      case 'select': {
+        const value = String(raw ?? '');
+        const options = (field.options || []).map((o) => typeof o === 'object' ? o.value : o);
+        if (!options.includes(value)) throw new Error(`${field.label || field.path} 不是可选值`);
+        return value;
+      }
       case 'secret': {
         const text = String(raw ?? '');
         // 空 = 别动它（面板不回显密钥，清空保存不该把已有 key 抹掉）
@@ -409,6 +425,7 @@ export class ControlServer {
     if (!isObject(patch)) throw new Error('配置 patch 必须是对象');
     const allowed = new Set(['agent', 'chat', 'llm', 'share', 'persona', 'dailyNews']);
     const clean = {};
+    const effective = this.#effectiveConfig();
     for (const [k, v] of Object.entries(patch || {})) {
       if (!allowed.has(k)) continue;
       if (k === 'dailyNews') {
@@ -417,31 +434,59 @@ export class ControlServer {
       }
       if (k === 'persona') {
         const src = v && typeof v === 'object' ? v : {};
-        clean.persona = { ...(this.cfg.persona || {}) };
+        clean.persona = { ...(effective.persona || {}) };
         if ('name' in src) clean.persona.name = String(src.name || '').slice(0, 40);
         if ('identity' in src) clean.persona.identity = String(src.identity || '').slice(0, 400);
         if ('style' in src) clean.persona.style = String(src.style || '').slice(0, 400);
         if ('source' in src) clean.persona.source = String(src.source || '').slice(0, 120);
-        if ('systemPrompt' in src) clean.persona.systemPrompt = String(src.systemPrompt || '').slice(0, 20000);
+        if ('systemPrompt' in src) clean.persona.systemPrompt = String(src.systemPrompt || '');
         if (Array.isArray(src.likes)) clean.persona.likes = src.likes.map((x) => String(x).slice(0, 40)).slice(0, 30);
         if (Array.isArray(src.rules)) clean.persona.rules = src.rules.map((x) => String(x).slice(0, 200)).slice(0, 40);
+        continue;
+      }
+      if (k === 'llm' && isObject(v)) {
+        validateReasoningConfig(v);
+        clean.llm = { ...(this.cfg.llm || {}), ...v };
+        if (Object.hasOwn(v, 'reasoningEfforts')) clean.llm.reasoningEfforts = { ...(this.cfg.llm?.reasoningEfforts || {}), ...v.reasoningEfforts };
         continue;
       }
       clean[k] = { ...(this.cfg[k] || {}), ...(v && typeof v === 'object' ? v : {}) };
     }
     if (!Object.keys(clean).length) throw new Error('没有可改的字段');
 
-    const next = { ...this.cfg, ...clean };
+    const next = { ...effective, ...clean };
     // 数组字段要原样保留，别被合并成对象
     for (const k of Object.keys(clean)) {
-      if (!Array.isArray(clean[k]) && typeof clean[k] === 'object') next[k] = { ...(this.cfg[k] || {}), ...clean[k] };
+      if (!Array.isArray(clean[k]) && typeof clean[k] === 'object') next[k] = { ...(effective[k] || {}), ...clean[k] };
     }
-    if (!this.configPath) throw new Error('不知道配置文件路径，不能保存');
-    // 运行期内部字段（loadConfig 塞进来的）不写回磁盘
-    const 落盘 = Object.fromEntries(Object.entries(next).filter(([k]) => !k.startsWith('__')));
-    fs.writeFileSync(this.configPath, JSON.stringify(落盘, null, 2) + '\n', 'utf8');
-    this.cfg = next;
+    this.#persistConfig(next, Object.hasOwn(clean, 'persona'));
     return { saved: Object.keys(clean), configPath: this.configPath, restarting: true };
+  }
+
+  #persistConfig(next, syncPersona = false, personaOnly = false) {
+    if (!this.configPath) throw new Error('不知道配置文件路径，不能保存');
+    const previous = fs.readFileSync(this.configPath);
+    const disk = personaOnly
+      ? { ...JSON.parse(previous), persona: next.persona }
+      : Object.fromEntries(Object.entries(next).filter(([k]) => !k.startsWith('__')));
+    // Same-directory rename preserves complete JSON and the existing private file mode.
+    const tmp = `${this.configPath}.${process.pid}.pending`;
+    const mode = fs.statSync(this.configPath).mode & 0o777;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(disk, null, 2) + '\n', { mode });
+      fs.chmodSync(tmp, mode);
+      fs.renameSync(tmp, this.configPath);
+      try {
+        if (syncPersona) this.bot.store?.setPersona(next.persona);
+      } catch (error) {
+        fs.writeFileSync(tmp, previous, { mode });
+        fs.renameSync(tmp, this.configPath);
+        throw error;
+      }
+      this.cfg = next;
+    } finally {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    }
   }
 
   #authorized(req, url) {
@@ -554,7 +599,8 @@ export class ControlServer {
     if (!this.#authorized(req, url)) return this.#json(res, 401, { ok: false, error: 'token 不正确' });
 
     if (pathName === '/api/status' && req.method === 'GET') {
-      return this.#json(res, 200, { ok: true, ...this.bot.status() });
+      const status = this.bot.refreshStatus ? await this.bot.refreshStatus() : this.bot.status();
+      return this.#json(res, 200, { ok: true, ...status });
     }
 
     if (pathName === '/api/daily-news' && req.method === 'GET') {
@@ -566,7 +612,7 @@ export class ControlServer {
     if (pathName === '/api/groups' && req.method === 'GET') {
       const refresh = url.searchParams.get('refresh') === '1';
       const groups = refresh ? await this.bot.refreshGroups() : [...this.bot.groups.values()];
-      return this.#json(res, 200, { ok: true, groups });
+      return this.#json(res, 200, { ok: true, groups, freshness: this.bot.freshness?.groups || null });
     }
 
     if (pathName === '/api/friends' && req.method === 'GET') {
@@ -733,13 +779,43 @@ export class ControlServer {
       }
     }
 
+    if (pathName === '/api/autochat' && req.method === 'GET') {
+      const scope = url.searchParams.get('scope');
+      if (!scope) return this.#json(res, 400, { ok: false, error: '缺少 scope' });
+      try {
+        return this.#json(res, 200, { ok: true, ...this.bot.getAutochat(scope) });
+      } catch (err) {
+        return this.#json(res, 400, { ok: false, error: err.message });
+      }
+    }
+
     if (pathName === '/api/autochat' && req.method === 'POST') {
       const body = await this.#readBody(req);
       if (!body.scope) return this.#json(res, 400, { ok: false, error: '缺少 scope' });
       try {
         const state = this.bot.setAutochat(body.scope, body.enabled !== false);
+        const status = this.bot.getAutochat(body.scope);
         this.broadcast({ type: 'admin', scope: body.scope, action: body.enabled ? 'unmute' : 'mute', at: Date.now() });
-        return this.#json(res, 200, { ok: true, ...state });
+        return this.#json(res, 200, { ok: true, ...state, ...status });
+      } catch (err) {
+        return this.#json(res, 400, { ok: false, error: err.message });
+      }
+    }
+
+    if (pathName === '/api/persona/evolve' && req.method === 'GET') {
+      return this.#json(res, 200, { ok: true, ...(this.personaEvolve?.status?.() || { enabled: false, count: 0, history: [] }) });
+    }
+
+    if (pathName === '/api/persona/evolve' && req.method === 'POST') {
+      if (!this.personaEvolve) return this.#json(res, 400, { ok: false, error: '人格微调没启动' });
+      const body = await this.#readBody(req);
+      try {
+        if (String(body.op || '') === 'undo') {
+          const r = this.personaEvolve.undo(String(body.id || ''));
+          return this.#json(res, r.ok === false ? 400 : 200, { ...r, status: this.personaEvolve.status() });
+        }
+        const r = await this.personaEvolve.maybeEvolve({ notes: this.learn?.top?.(10) || [], force: true });
+        return this.#json(res, 200, { ...r, status: this.personaEvolve.status() });
       } catch (err) {
         return this.#json(res, 400, { ok: false, error: err.message });
       }
@@ -751,13 +827,15 @@ export class ControlServer {
 
     if (pathName === '/api/persona' && req.method === 'POST') {
       const body = await this.#readBody(req);
-      const persona = body.persona && typeof body.persona === 'object' ? body.persona : body;
-      if (!persona || (!persona.name && !persona.style)) {
+      const patch = Object.hasOwn(body, 'persona') ? body.persona : body;
+      if (!isObject(patch) || (!patch.name && !patch.style)) {
         return this.#json(res, 400, { ok: false, error: '人设至少要有 name 或 style' });
       }
-      const saved = this.bot.store.setPersona(persona);
+      // Tool edits are partial: retain the imported full prompt, examples and flags.
+      const persona = { ...(this.#effectiveConfig().persona || {}), ...patch };
+      this.#persistConfig({ ...this.cfg, persona }, true, true);
       this.log.info('人设已更新');
-      return this.#json(res, 200, { ok: true, persona: saved });
+      return this.#json(res, 200, { ok: true, persona });
     }
 
     if (pathName === '/api/kb' && req.method === 'GET') {
@@ -879,6 +957,74 @@ export class ControlServer {
           return this.#json(res, 200, { ok: true, ...r });
         }
         return this.#json(res, 400, { ok: false, error: 'op 只能是 reply / comment' });
+      } catch (err) {
+        return this.#json(res, 400, { ok: false, error: err.message });
+      }
+    }
+
+    if (pathName === '/api/social' && req.method === 'GET') {
+      if (!this.social) return this.#json(res, 400, { ok: false, error: '视频社交没启动' });
+      const status = await this.social.status();
+      const acted = Object.entries(this.social.state?.acted || {})
+        .map(([id, v]) => ({ id, ...v }))
+        .sort((a, b) => (b.at || 0) - (a.at || 0))
+        .slice(0, 12);
+      return this.#json(res, 200, { ok: true, ...status, acted });
+    }
+
+    if (pathName === '/api/social' && req.method === 'POST') {
+      if (!this.social) return this.#json(res, 400, { ok: false, error: '视频社交没启动' });
+      const body = await this.#readBody(req);
+      const op = String(body.op || '');
+      try {
+        if (op === 'tick') {
+          const r = await this.social.tick({ force: body.force === true });
+          return this.#json(res, 200, { ok: r.ok !== false, ...r });
+        }
+        if (op === 'login') {
+          const qr = await this.social.loginStart();
+          return this.#json(res, 200, { ok: true, ...qr });
+        }
+        if (op === 'logout') {
+          this.social.bili.setCookie('');
+          return this.#json(res, 200, { ok: true });
+        }
+        if (op === 'check') {
+          const r = await this.social.checkReplies({ max: 12 });
+          return this.#json(res, 200, { ok: true, ...r, replies: this.social.recentReplies({ limit: 5 }) });
+        }
+        if (op === 'quota') {
+          const updates = {};
+          if (body.commentPerDay !== undefined) {
+            const n = Number(body.commentPerDay);
+            if (!Number.isFinite(n)) throw new Error('commentPerDay 需要数字');
+            updates['social.commentPerDay'] = Math.max(0, Math.min(50, Math.trunc(n)));
+          }
+          if (body.likePerDay !== undefined) {
+            const n = Number(body.likePerDay);
+            if (!Number.isFinite(n)) throw new Error('likePerDay 需要数字');
+            updates['social.likePerDay'] = Math.max(0, Math.min(100, Math.trunc(n)));
+          }
+          if (!Object.keys(updates).length) throw new Error('没有要改的额度');
+          const saved = this.#saveUpdates(updates);
+          // 面板保存的是整份配置，SocialHub 手里的旧 cfg 也要跟着换，额度立即生效
+          this.social.cfg = this.cfg.social || this.social.cfg;
+          return this.#json(res, 200, { ok: true, ...saved, quota: this.social.quota() });
+        }
+        if (op === 'learn') {
+          const r = await this.social.learnFromFeed({ force: true });
+          return this.#json(res, 200, { ok: r.ok !== false, ...r });
+        }
+        if (op === 'act') {
+          const r = await this.social.act({
+            action: String(body.action || ''),
+            aid: String(body.aid || ''),
+            text: String(body.text || ''),
+            replyTo: body.reply_to ? String(body.reply_to) : '',
+          });
+          return this.#json(res, 200, { ok: true, ...r });
+        }
+        return this.#json(res, 400, { ok: false, error: 'op 只能是 tick / check / login / logout / act / quota / learn' });
       } catch (err) {
         return this.#json(res, 400, { ok: false, error: err.message });
       }

@@ -203,3 +203,56 @@ test('study 工具：给话题就去学，学到的东西真进了笔记库', as
   assert.match(book.notes[0].text, /钟馗/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('学 B站 刷到的内容：素材进提示词，笔记按 feed 落库', async () => {
+  const { Learner, LearnBook } = await import('../src/learn.mjs');
+  const dir = tmp();
+  const book = new LearnBook({ dataDir: dir });
+  let prompt = '';
+  const brain = {
+    async complete(input) {
+      prompt = input.prompt;
+      return '- 显卡吧把 40 系叫「煤气灶」|煤气灶,显卡\n- 评论区在争 DLSS 值不值|DLSS,画质';
+    },
+  };
+  const learner = new Learner({ dataDir: dir, brain, book, scopes: () => [] });
+  const r = await learner.learnFeed({
+    items: [{
+      title: '40 系显卡到底多热',
+      desc: '实测功耗',
+      author: '硬件UP',
+      comments: [{ user: '网友A', content: '这温度能煎蛋' }],
+    }],
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.added, 2);
+  assert.match(prompt, /40 系显卡到底多热/);
+  assert.match(prompt, /这温度能煎蛋/);
+  const note = book.notes.find((n) => n.text.includes('煤气灶'));
+  assert.equal(note.kind, 'feed');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('学刷到的内容：行为、口头禅分开存，口头禅不会混进知识笔记', async () => {
+  const { Learner, LearnBook, parseFeedNotes } = await import('../src/learn.mjs');
+  const parsed = parseFeedNotes('[行为] 被人阴阳时先顺着夸一句|接梗,阴阳\n[口头禅] 可以这样说：这波不亏|口头禅\n[想要] 冰可乐\n显卡又涨价了|显卡');
+  assert.equal(parsed.length, 4);
+  assert.deepEqual(parsed.map((n) => n.kind), ['behavior', 'phrase', 'want', 'feed']);
+
+  const dir = tmp();
+  const book = new LearnBook({ dataDir: dir });
+  const brain = {
+    async complete() {
+      return '[行为] 群里有人求推荐时先问预算|推荐,预算\n[口头禅] 可以这样说：先别急，让我缓缓|口头禅\n[想要] 冰可乐\n40 系显卡发热大|显卡';
+    },
+  };
+  const learner = new Learner({ dataDir: dir, brain, book, scopes: () => [] });
+  const r = await learner.learnFeed({ items: [{ title: '装机视频', liked: true }] });
+  assert.equal(book.byKind('behavior').length, 1);
+  assert.equal(book.byKind('phrase').length, 1);
+  assert.equal(book.byKind('feed').length, 1);
+  assert.match(book.byKind('behavior')[0].text, /预算/);
+  assert.deepEqual(r.wants, ['冰可乐']);
+  assert.equal(book.byKind('want').length, 0, '想要的东西不该混进笔记库');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
